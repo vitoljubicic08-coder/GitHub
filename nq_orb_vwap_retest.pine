@@ -1,0 +1,326 @@
+//@version=5
+indicator("NQ ORB + VWAP Retest (10pt/3R)", overlay=true, max_lines_count=50, max_labels_count=50)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 1) INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Session Settings
+tz = input.string("America/New_York", "Timezone", group="Session Settings")
+rthSession = input.session("0930-1600", "RTH Session", group="Session Settings")
+orbMinutes = input.int(15, "ORB Minutes", options=[5, 15], group="Session Settings")
+startAfterMinutes = input.int(0, "Start After (minutes)", minval=0, maxval=120, group="Session Settings")
+stopBeforeMinutes = input.int(30, "Stop Before Close (minutes)", minval=0, maxval=120, group="Session Settings")
+sessionLengthMinutes = input.int(390, "Session Length (minutes)", minval=60, maxval=1440, group="Session Settings")
+
+// Bias / Filters
+useVWAPBias = input.bool(true, "Use VWAP Bias", group="Bias / Filters")
+useVWAPSlopeFilter = input.bool(true, "Use VWAP Slope Filter", group="Bias / Filters")
+vwapSlopeLookback = input.int(20, "VWAP Slope Lookback", minval=5, maxval=100, group="Bias / Filters")
+minVWAPSlope = input.float(0.0, "Min VWAP Slope", minval=0.0, maxval=10.0, step=0.1, group="Bias / Filters")
+useATRVolFilter = input.bool(true, "Use ATR Vol Filter", group="Bias / Filters")
+atrLen = input.int(14, "ATR Length", minval=5, maxval=50, group="Bias / Filters")
+minATR = input.float(8.0, "Min ATR (points)", minval=0.0, maxval=50.0, step=0.5, group="Bias / Filters")
+useTrendEMAFilter = input.bool(false, "Use Trend EMA Filter", group="Bias / Filters")
+emaLen = input.int(200, "EMA Length", minval=20, maxval=500, group="Bias / Filters")
+
+// Entry Rules
+entryMode = input.string("Retest", "Entry Mode", options=["Retest", "Breakout"], group="Entry Rules")
+retestTolerancePts = input.float(2.0, "Retest Tolerance (points)", minval=0.0, maxval=20.0, step=0.5, group="Entry Rules")
+confirmCloseBeyondLevel = input.bool(true, "Confirm Close Beyond Level", group="Entry Rules")
+microStructureConfirm = input.bool(true, "Microstructure Confirm", group="Entry Rules")
+microLookback = input.int(10, "Micro Lookback", minval=3, maxval=50, group="Entry Rules")
+
+// Risk/Reward
+slPoints = input.float(10.0, "Stop Loss (points)", minval=1.0, maxval=100.0, step=0.5, group="Risk/Reward")
+rr = input.float(3.0, "Risk:Reward", minval=1.0, maxval=10.0, step=0.5, group="Risk/Reward")
+
+// Signal Control
+maxSignalsPerDay = input.int(2, "Max Signals Per Day", minval=1, maxval=10, group="Signal Control")
+cooldownBars = input.int(15, "Cooldown (bars)", minval=0, maxval=200, group="Signal Control")
+
+// Display
+showORB = input.bool(true, "Show ORB Lines", group="Display")
+showVWAP = input.bool(true, "Show VWAP", group="Display")
+showSLTP = input.bool(true, "Show SL/TP Lines", group="Display")
+showDebugLabels = input.bool(false, "Show Debug Labels", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 2) SESSION DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+inRTH = not na(time(timeframe.period, rthSession, tz))
+var float sessionOpenTime = na
+var int sessionDay = na
+currentDay = dayofweek(time, tz)
+
+// Detect first bar of RTH session
+if inRTH and (na(sessionDay) or sessionDay != currentDay)
+    sessionOpenTime := time
+    sessionDay := currentDay
+
+// Calculate minutes since open and to close
+minsSinceOpen = na(sessionOpenTime) ? 0.0 : (time - sessionOpenTime) / 60000.0
+minsToClose = sessionLengthMinutes - minsSinceOpen
+sessionOK = inRTH and minsSinceOpen >= startAfterMinutes and minsToClose >= stopBeforeMinutes
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 3) ORB CONSTRUCTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float orbHigh = na
+var float orbLow = na
+var bool orbComplete = false
+
+// Reset ORB on new day
+if inRTH and (na(sessionDay[1]) or sessionDay != sessionDay[1])
+    orbHigh := na
+    orbLow := na
+    orbComplete := false
+
+// Build ORB during ORB window
+inORBWindow = inRTH and minsSinceOpen <= orbMinutes and minsSinceOpen >= 0
+
+if inORBWindow
+    orbHigh := na(orbHigh) ? high : math.max(orbHigh, high)
+    orbLow := na(orbLow) ? low : math.min(orbLow, low)
+    orbComplete := false
+else if inRTH and minsSinceOpen > orbMinutes
+    orbComplete := true
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 4) VWAP AND FILTERS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+vwapValue = ta.vwap(hlc3)
+atrValue = ta.atr(atrLen)
+emaValue = useTrendEMAFilter ? ta.ema(close, emaLen) : na
+
+// VWAP slope
+vwapSlope = vwapValue - vwapValue[vwapSlopeLookback]
+vwapSlopeUpOK = not useVWAPSlopeFilter or (vwapSlope > 0 and math.abs(vwapSlope) >= minVWAPSlope)
+vwapSlopeDownOK = not useVWAPSlopeFilter or (vwapSlope < 0 and math.abs(vwapSlope) >= minVWAPSlope)
+
+// ATR filter
+atrOK = not useATRVolFilter or atrValue >= minATR
+
+// VWAP bias
+longVWAPBias = not useVWAPBias or close > vwapValue
+shortVWAPBias = not useVWAPBias or close < vwapValue
+
+// EMA trend filter
+longEMAOK = not useTrendEMAFilter or close > emaValue
+shortEMAOK = not useTrendEMAFilter or close < emaValue
+
+// Combined filters
+longFiltersOK = longVWAPBias and vwapSlopeUpOK and atrOK and longEMAOK
+shortFiltersOK = shortVWAPBias and vwapSlopeDownOK and atrOK and shortEMAOK
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 5) ENTRY LOGIC
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Track breakout status for retest mode
+var bool longBroken = false
+var bool shortBroken = false
+
+// Reset breakout status on new day
+if inRTH and (na(sessionDay[1]) or sessionDay != sessionDay[1])
+    longBroken := false
+    shortBroken := false
+
+// Detect initial breakout (for retest mode)
+if orbComplete and not na(orbHigh) and not longBroken
+    if confirmCloseBeyondLevel
+        if close > orbHigh and close[1] <= orbHigh
+            longBroken := true
+    else
+        if high > orbHigh
+            longBroken := true
+
+if orbComplete and not na(orbLow) and not shortBroken
+    if confirmCloseBeyondLevel
+        if close < orbLow and close[1] >= orbLow
+            shortBroken := true
+    else
+        if low < orbLow
+            shortBroken := true
+
+// Microstructure confirmation
+microHighBreak = not microStructureConfirm or close > ta.highest(high, microLookback)[1]
+microLowBreak = not microStructureConfirm or close < ta.lowest(low, microLookback)[1]
+
+// Entry conditions by mode
+buyCondition = false
+sellCondition = false
+
+if entryMode == "Breakout"
+    // Breakout mode
+    if orbComplete and not na(orbHigh) and sessionOK and longFiltersOK
+        if confirmCloseBeyondLevel
+            buyCondition := close > orbHigh and close[1] <= orbHigh and microHighBreak
+        else
+            buyCondition := high > orbHigh and microHighBreak
+
+    if orbComplete and not na(orbLow) and sessionOK and shortFiltersOK
+        if confirmCloseBeyondLevel
+            sellCondition := close < orbLow and close[1] >= orbLow and microLowBreak
+        else
+            sellCondition := low < orbLow and microLowBreak
+
+else if entryMode == "Retest"
+    // Retest mode - wait for breakout then enter on pullback
+    if longBroken and orbComplete and not na(orbHigh) and sessionOK and longFiltersOK
+        // Check if price retests ORB high
+        distanceToORBHigh = math.abs(low - orbHigh)
+        atORBLevel = distanceToORBHigh <= retestTolerancePts
+        bullishReclaim = close > open and close > orbHigh
+
+        if atORBLevel and bullishReclaim and microHighBreak
+            buyCondition := true
+
+    if shortBroken and orbComplete and not na(orbLow) and sessionOK and shortFiltersOK
+        // Check if price retests ORB low
+        distanceToORBLow = math.abs(high - orbLow)
+        atORBLevel = distanceToORBLow <= retestTolerancePts
+        bearishReclaim = close < open and close < orbLow
+
+        if atORBLevel and bearishReclaim and microLowBreak
+            sellCondition := true
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 6) SIGNAL MANAGEMENT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int signalsToday = 0
+var int lastSignalBar = -999
+var bool inTrade = false
+var int tradeDir = 0
+var float entryPrice = na
+var float slPrice = na
+var float tpPrice = na
+
+// Reset daily signal count
+if ta.change(time("D", tz))
+    signalsToday := 0
+
+// Check if trade hit SL or TP
+if inTrade
+    if tradeDir == 1
+        if low <= slPrice or high >= tpPrice
+            inTrade := false
+            tradeDir := 0
+    else if tradeDir == -1
+        if high >= slPrice or low <= tpPrice
+            inTrade := false
+            tradeDir := 0
+
+// Check if new signal is allowed
+signalAllowed = not inTrade and signalsToday < maxSignalsPerDay and (bar_index - lastSignalBar) >= cooldownBars
+
+// Generate signals
+buySignal = false
+sellSignal = false
+
+if signalAllowed and buyCondition
+    entryPrice := close
+    slPrice := entryPrice - slPoints
+    tpPrice := entryPrice + (slPoints * rr)
+    buySignal := true
+    inTrade := true
+    tradeDir := 1
+    signalsToday := signalsToday + 1
+    lastSignalBar := bar_index
+
+if signalAllowed and sellCondition
+    entryPrice := close
+    slPrice := entryPrice + slPoints
+    tpPrice := entryPrice - (slPoints * rr)
+    sellSignal := true
+    inTrade := true
+    tradeDir := -1
+    signalsToday := signalsToday + 1
+    lastSignalBar := bar_index
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 7) PLOTTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Plot signals
+plotshape(buySignal, title="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), text="BUY", size=size.normal)
+plotshape(sellSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", size=size.normal)
+
+// Plot ORB levels
+plot(showORB and orbComplete ? orbHigh : na, "ORB High", color=color.new(color.blue, 0), linewidth=2, style=plot.style_linebr)
+plot(showORB and orbComplete ? orbLow : na, "ORB Low", color=color.new(color.orange, 0), linewidth=2, style=plot.style_linebr)
+
+// Plot VWAP
+plot(showVWAP ? vwapValue : na, "VWAP", color=color.new(color.purple, 0), linewidth=2)
+
+// Plot EMA if enabled
+plot(useTrendEMAFilter ? emaValue : na, "EMA", color=color.new(color.gray, 0), linewidth=1)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 8) SL/TP LINES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var line slLine = na
+var line tpLine = na
+
+if showSLTP
+    if inTrade
+        if buySignal or sellSignal
+            // Delete previous lines
+            if not na(slLine)
+                line.delete(slLine)
+            if not na(tpLine)
+                line.delete(tpLine)
+
+            // Create new lines
+            slLine := line.new(bar_index, slPrice, bar_index + 1, slPrice, color=color.red, style=line.style_dashed, width=2)
+            tpLine := line.new(bar_index, tpPrice, bar_index + 1, tpPrice, color=color.green, style=line.style_dashed, width=2)
+        else
+            // Extend lines
+            if not na(slLine)
+                line.set_x2(slLine, bar_index + 1)
+            if not na(tpLine)
+                line.set_x2(tpLine, bar_index + 1)
+    else
+        // Clear lines when not in trade
+        if not na(slLine)
+            line.delete(slLine)
+            slLine := na
+        if not na(tpLine)
+            line.delete(tpLine)
+            tpLine := na
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 9) DEBUG LABELS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if showDebugLabels
+    debugText = ""
+
+    if not orbComplete
+        debugText := "ORB Building"
+    else if not sessionOK
+        debugText := "Outside Trading Hours"
+    else if not atrOK
+        debugText := "ATR Too Low"
+    else if entryMode == "Retest"
+        if not longBroken and not shortBroken
+            debugText := "Waiting Breakout"
+        else if longBroken and not buyCondition
+            debugText := "Waiting Long Retest"
+        else if shortBroken and not sellCondition
+            debugText := "Waiting Short Retest"
+
+    if debugText != ""
+        label.new(bar_index, high, debugText, style=label.style_label_down, color=color.new(color.yellow, 70), textcolor=color.black, size=size.tiny)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 10) ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="BUY", message="ORB+VWAP Retest BUY")
+alertcondition(sellSignal, title="SELL", message="ORB+VWAP Retest SELL")

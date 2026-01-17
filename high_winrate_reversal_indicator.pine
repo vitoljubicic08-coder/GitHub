@@ -1,0 +1,298 @@
+//@version=5
+indicator("High Win-Rate Reversal Strategy", overlay=true, max_lines_count=100, max_labels_count=100)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// USER INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Moving Average
+maLength = input.int(10, "MA Length", minval=1, maxval=200, group="Entry Confirmation")
+maType = input.string("SMA", "MA Type", options=["SMA", "EMA"], group="Entry Confirmation")
+
+// MACD Settings
+macdFast = input.int(12, "MACD Fast Length", minval=2, maxval=100, group="MACD Settings")
+macdSlow = input.int(26, "MACD Slow Length", minval=2, maxval=200, group="MACD Settings")
+macdSignal = input.int(9, "MACD Signal Length", minval=1, maxval=50, group="MACD Settings")
+
+// Pivot Detection
+pivotLeftBars = input.int(5, "Pivot Left Bars", minval=2, maxval=20, group="Pattern Detection")
+pivotRightBars = input.int(5, "Pivot Right Bars", minval=2, maxval=20, group="Pattern Detection")
+patternLookback = input.int(50, "Pattern Lookback Period", minval=10, maxval=200, group="Pattern Detection")
+pivotTolerance = input.float(0.3, "Pivot Match Tolerance %", minval=0.1, maxval=2.0, step=0.1, group="Pattern Detection")
+
+// ATR Settings
+atrLength = input.int(14, "ATR Length", minval=5, maxval=100, group="Risk Management")
+atrStopMult = input.float(1.5, "ATR Stop Loss Multiplier", minval=0.5, maxval=5.0, step=0.1, group="Risk Management")
+atrTargetMult = input.float(1.0, "ATR Take Profit Multiplier", minval=0.5, maxval=5.0, step=0.1, group="Risk Management")
+riskRewardRatio = input.float(1.0, "Risk:Reward Ratio", minval=0.5, maxval=5.0, step=0.1, group="Risk Management")
+useRRForTP = input.bool(true, "Use R:R for TP (else ATR)", group="Risk Management")
+
+// Higher Timeframe Filter
+useHTFFilter = input.bool(false, "Enable HTF Trend Filter", group="Higher Timeframe Filter")
+htfTimeframe = input.timeframe("15", "HTF Timeframe", group="Higher Timeframe Filter")
+htfMALength = input.int(50, "HTF MA Length", minval=10, maxval=500, group="Higher Timeframe Filter")
+
+// Session Filter
+useSessionFilter = input.bool(false, "Enable Session Filter", group="Session Filter")
+sessionStart = input.int(8, "Session Start Hour", minval=0, maxval=23, group="Session Filter")
+sessionEnd = input.int(16, "Session End Hour", minval=0, maxval=23, group="Session Filter")
+sessionTimezone = input.string("America/New_York", "Timezone", group="Session Filter")
+
+// Display Options
+showPatterns = input.bool(true, "Show Pattern Markers", group="Display")
+showSLTP = input.bool(true, "Show SL/TP Lines", group="Display")
+showMA = input.bool(true, "Show MA Line", group="Display")
+showLabels = input.bool(true, "Show Price Labels", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION FILTER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+sessionHour = hour(time, sessionTimezone)
+inSession = not useSessionFilter or (sessionHour >= sessionStart and sessionHour < sessionEnd)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INDICATORS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Moving Average
+ma = maType == "SMA" ? ta.sma(close, maLength) : ta.ema(close, maLength)
+
+// MACD
+[macdLine, signalLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSignal)
+macdBullCross = ta.crossover(macdLine, signalLine)
+macdBearCross = ta.crossunder(macdLine, signalLine)
+
+// ATR
+atr = ta.atr(atrLength)
+
+// Higher Timeframe Filter
+htfMA = useHTFFilter ? request.security(syminfo.tickerid, htfTimeframe, ta.sma(close, htfMALength), lookahead=barmerge.lookahead_off) : na
+htfPrice = useHTFFilter ? request.security(syminfo.tickerid, htfTimeframe, close, lookahead=barmerge.lookahead_off) : na
+htfBullish = not useHTFFilter or (not na(htfMA) and not na(htfPrice) and htfPrice > htfMA)
+htfBearish = not useHTFFilter or (not na(htfMA) and not na(htfPrice) and htfPrice < htfMA)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PIVOT DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+pivotLow = ta.pivotlow(low, pivotLeftBars, pivotRightBars)
+pivotHigh = ta.pivothigh(high, pivotLeftBars, pivotRightBars)
+
+// Store recent pivots
+var array<float> recentLows = array.new_float(0)
+var array<float> recentHighs = array.new_float(0)
+var array<int> recentLowBars = array.new_int(0)
+var array<int> recentHighBars = array.new_int(0)
+
+// Add new pivots to arrays
+if not na(pivotLow)
+    array.push(recentLows, pivotLow)
+    array.push(recentLowBars, bar_index - pivotRightBars)
+    if array.size(recentLows) > 10
+        array.shift(recentLows)
+        array.shift(recentLowBars)
+
+if not na(pivotHigh)
+    array.push(recentHighs, pivotHigh)
+    array.push(recentHighBars, bar_index - pivotRightBars)
+    if array.size(recentHighs) > 10
+        array.shift(recentHighs)
+        array.shift(recentHighBars)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DOUBLE BOTTOM / DOUBLE TOP DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float doubleBottomLevel = na
+var float doubleTopLevel = na
+var int doubleBottomBar = na
+var int doubleTopBar = na
+var bool doubleBottomActive = false
+var bool doubleTopActive = false
+
+// Detect Double Bottom
+if array.size(recentLows) >= 2
+    for i = array.size(recentLows) - 1 to 1
+        currentLow = array.get(recentLows, i)
+        currentBar = array.get(recentLowBars, i)
+        for j = i - 1 to 0
+            priorLow = array.get(recentLows, j)
+            priorBar = array.get(recentLowBars, j)
+            // Check if bars are within lookback and prices match within tolerance
+            if (currentBar - priorBar) <= patternLookback and (currentBar - priorBar) >= pivotLeftBars + pivotRightBars
+                priceDiff = math.abs(currentLow - priorLow) / priorLow * 100
+                if priceDiff <= pivotTolerance
+                    doubleBottomLevel := math.min(currentLow, priorLow)
+                    doubleBottomBar := currentBar
+                    doubleBottomActive := true
+                    break
+        if doubleBottomActive
+            break
+
+// Detect Double Top
+if array.size(recentHighs) >= 2
+    for i = array.size(recentHighs) - 1 to 1
+        currentHigh = array.get(recentHighs, i)
+        currentBar = array.get(recentHighBars, i)
+        for j = i - 1 to 0
+            priorHigh = array.get(recentHighs, j)
+            priorBar = array.get(recentHighBars, j)
+            // Check if bars are within lookback and prices match within tolerance
+            if (currentBar - priorBar) <= patternLookback and (currentBar - priorBar) >= pivotLeftBars + pivotRightBars
+                priceDiff = math.abs(currentHigh - priorHigh) / priorHigh * 100
+                if priceDiff <= pivotTolerance
+                    doubleTopLevel := math.max(currentHigh, priorHigh)
+                    doubleTopBar := currentBar
+                    doubleTopActive := true
+                    break
+        if doubleTopActive
+            break
+
+// Reset patterns if too old
+if doubleBottomActive and (bar_index - doubleBottomBar) > patternLookback
+    doubleBottomActive := false
+    doubleBottomLevel := na
+
+if doubleTopActive and (bar_index - doubleTopBar) > patternLookback
+    doubleTopActive := false
+    doubleTopLevel := na
+
+// Debug pattern detection
+if showPatterns and not na(pivotLow)
+    label.new(bar_index - pivotRightBars, pivotLow, "L", style=label.style_label_up, color=color.new(color.blue, 50), textcolor=color.white, size=size.tiny)
+
+if showPatterns and not na(pivotHigh)
+    label.new(bar_index - pivotRightBars, pivotHigh, "H", style=label.style_label_down, color=color.new(color.orange, 50), textcolor=color.white, size=size.tiny)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENGULFING CANDLE DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Current candle details
+currentBody = close - open
+priorBody = close[1] - open[1]
+currentRange = high - low
+priorRange = high[1] - low[1]
+
+// Bullish Engulfing: current candle body engulfs prior candle body and closes above MA
+bullishEngulfing = close > open and open <= close[1] and close >= open[1] and currentBody > priorBody and close > ma
+
+// Bearish Engulfing: current candle body engulfs prior candle body and closes below MA
+bearishEngulfing = close < open and open >= close[1] and close <= open[1] and math.abs(currentBody) > math.abs(priorBody) and close < ma
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENTRY CONDITIONS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Long Setup
+longSetup = doubleBottomActive and bullishEngulfing and (macdBullCross or macdLine > signalLine) and htfBullish and inSession and not na(doubleBottomLevel)
+
+// Short Setup
+shortSetup = doubleTopActive and bearishEngulfing and (macdBearCross or macdLine < signalLine) and htfBearish and inSession and not na(doubleTopLevel)
+
+// Prevent multiple signals
+var bool inTrade = false
+var int tradeDir = 0
+
+// Generate signals
+buySignal = longSetup and not inTrade
+sellSignal = shortSetup and not inTrade
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CALCULATE SL AND TP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+
+if buySignal
+    entryPrice := close
+    stopLoss := doubleBottomLevel - (atr * atrStopMult)
+    riskAmount = entryPrice - stopLoss
+    if useRRForTP
+        takeProfit := entryPrice + (riskAmount * riskRewardRatio)
+    else
+        takeProfit := entryPrice + (atr * atrTargetMult)
+    inTrade := true
+    tradeDir := 1
+    doubleBottomActive := false
+
+if sellSignal
+    entryPrice := close
+    stopLoss := doubleTopLevel + (atr * atrStopMult)
+    riskAmount = stopLoss - entryPrice
+    if useRRForTP
+        takeProfit := entryPrice - (riskAmount * riskRewardRatio)
+    else
+        takeProfit := entryPrice - (atr * atrTargetMult)
+    inTrade := true
+    tradeDir := -1
+    doubleTopActive := false
+
+// Check if trade hit SL or TP
+if inTrade
+    if tradeDir == 1
+        if low <= stopLoss or high >= takeProfit
+            inTrade := false
+            tradeDir := 0
+    else if tradeDir == -1
+        if high >= stopLoss or low <= takeProfit
+            inTrade := false
+            tradeDir := 0
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PLOTTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Plot MA
+plot(showMA ? ma : na, "MA", color=color.new(color.yellow, 0), linewidth=2)
+
+// Plot signals
+plotshape(buySignal, title="Buy Signal", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), text="BUY", size=size.normal)
+plotshape(sellSignal, title="Sell Signal", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", size=size.normal)
+
+// Plot pattern levels
+plot(showPatterns and doubleBottomActive ? doubleBottomLevel : na, "Double Bottom", color=color.new(color.blue, 70), linewidth=2, style=plot.style_linebr)
+plot(showPatterns and doubleTopActive ? doubleTopLevel : na, "Double Top", color=color.new(color.orange, 70), linewidth=2, style=plot.style_linebr)
+
+// Draw SL/TP lines
+var line slLine = na
+var line tpLine = na
+var line entryLine = na
+
+if showSLTP
+    if buySignal or sellSignal
+        // Delete old lines
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryLine)
+            line.delete(entryLine)
+
+        // Draw new lines
+        slLine := line.new(bar_index, stopLoss, bar_index + 50, stopLoss, color=color.red, style=line.style_dashed, width=2, extend=extend.right)
+        tpLine := line.new(bar_index, takeProfit, bar_index + 50, takeProfit, color=color.green, style=line.style_dashed, width=2, extend=extend.right)
+        entryLine := line.new(bar_index, entryPrice, bar_index + 10, entryPrice, color=color.blue, style=line.style_solid, width=1)
+
+        // Add labels
+        if showLabels
+            label.new(bar_index, stopLoss, "SL: " + str.tostring(stopLoss, "#.##"), style=label.style_label_left, color=color.red, textcolor=color.white, size=size.small)
+            label.new(bar_index, takeProfit, "TP: " + str.tostring(takeProfit, "#.##"), style=label.style_label_left, color=color.green, textcolor=color.white, size=size.small)
+
+            // Calculate R:R
+            if buySignal
+                rrActual = (takeProfit - entryPrice) / (entryPrice - stopLoss)
+                label.new(bar_index, entryPrice, "Entry: " + str.tostring(entryPrice, "#.##") + "\nR:R=" + str.tostring(rrActual, "#.##"), style=label.style_label_right, color=color.blue, textcolor=color.white, size=size.small)
+            if sellSignal
+                rrActual = (entryPrice - takeProfit) / (stopLoss - entryPrice)
+                label.new(bar_index, entryPrice, "Entry: " + str.tostring(entryPrice, "#.##") + "\nR:R=" + str.tostring(rrActual, "#.##"), style=label.style_label_right, color=color.blue, textcolor=color.white, size=size.small)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="Buy Signal", message="High Win-Rate BUY Signal - Double Bottom + Engulfing + MACD")
+alertcondition(sellSignal, title="Sell Signal", message="High Win-Rate SELL Signal - Double Top + Engulfing + MACD")

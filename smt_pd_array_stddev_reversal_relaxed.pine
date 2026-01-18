@@ -1,0 +1,386 @@
+//@version=5
+indicator("SMT PD-Array StdDev Reversal - RELAXED", overlay=true, max_lines_count=200, max_labels_count=100)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RECOMMENDED: Use on 5-MINUTE chart
+// THIS VERSION: Simplified logic for more frequent signals while maintaining quality
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Sessions
+enableLondon = input.bool(true, "Enable London Session", group="Sessions")
+londonSession = input.session("0200-0600", "London Session (NY Time)", group="Sessions")
+enableNY = input.bool(true, "Enable NY Session", group="Sessions")
+nySession = input.session("0830-1400", "NY Session (NY Time)", group="Sessions")
+sessionTZ = input.string("America/New_York", "Timezone", group="Sessions")
+enableAllDay = input.bool(false, "Trade All Day (Ignore Sessions)", tooltip="Set TRUE to trade 24/7", group="Sessions")
+
+// VWAP Deviation
+devLen = input.int(200, "StdDev Length", minval=50, maxval=500, group="VWAP Deviation")
+devMode = input.string("Mode 2", "Deviation Mode", options=["Mode 1", "Mode 2"], group="VWAP Deviation")
+sigmaEntry = input.float(2.0, "Entry Sigma", minval=1.0, maxval=5.0, step=0.1, group="VWAP Deviation")
+sigmaMax = input.float(4.5, "Max Sigma", minval=2.0, maxval=6.0, step=0.1, group="VWAP Deviation")
+
+// Confirmation Filters (ALL OPTIONAL - Score Based)
+useRSI = input.bool(true, "Use RSI Filter", group="Confirmation Filters")
+rsiLen = input.int(14, "RSI Length", group="Confirmation Filters")
+rsiOversold = input.float(35, "RSI Oversold", group="Confirmation Filters")
+rsiOverbought = input.float(65, "RSI Overbought", group="Confirmation Filters")
+
+useMomentum = input.bool(true, "Use Momentum Reversal", tooltip="Detects bullish/bearish candles", group="Confirmation Filters")
+useWickFilter = input.bool(true, "Use Wick Quality Filter", group="Confirmation Filters")
+wickMinPct = input.float(0.20, "Min Wick %", minval=0.1, maxval=0.8, step=0.05, group="Confirmation Filters")
+
+useFVG = input.bool(true, "Use 15m FVG Proximity", group="Confirmation Filters")
+contextTF = input.timeframe("15", "Context Timeframe (FVG)", group="Confirmation Filters")
+fvgProxPts = input.float(15.0, "FVG Proximity (points)", minval=0.0, maxval=50.0, step=0.5, group="Confirmation Filters")
+
+useSMT = input.bool(false, "Use SMT Divergence", tooltip="Set FALSE for more signals", group="Confirmation Filters")
+smtSymbol = input.string("ES1!", "SMT Comparison Symbol", group="Confirmation Filters")
+
+minConfluence = input.int(1, "Min Confluence Score", minval=0, maxval=4, tooltip="How many filters must pass (0-4). Lower = more signals", group="Confirmation Filters")
+
+// Risk Management
+useStructureStops = input.bool(true, "Use Structure-Based Stops", tooltip="If FALSE, uses ATR stops", group="Risk Management")
+atrLen = input.int(14, "ATR Length", group="Risk Management")
+atrMult = input.float(1.5, "ATR Multiplier", group="Risk Management")
+minStopPts = input.float(6.0, "Min Stop (points)", minval=2.0, maxval=20.0, step=0.5, group="Risk Management")
+maxStopPts = input.float(16.0, "Max Stop (points)", minval=5.0, maxval=50.0, step=0.5, group="Risk Management")
+slBufferPts = input.float(1.0, "SL Buffer (points)", minval=0.0, maxval=5.0, step=0.25, group="Risk Management")
+skipWideStops = input.bool(false, "Skip Trade if Stop > Max", tooltip="Set FALSE to take all signals", group="Risk Management")
+rr = input.float(3.0, "Risk:Reward", minval=1.0, maxval=10.0, step=0.5, group="Risk Management")
+
+// Signal Control
+maxSignalsPerDay = input.int(8, "Max Signals Per Day", minval=1, maxval=20, group="Signal Control")
+cooldownBars = input.int(10, "Cooldown Bars", minval=0, maxval=200, group="Signal Control")
+onePerDirection = input.bool(false, "One Per Direction Per Session", group="Signal Control")
+
+// Display
+showVWAP = input.bool(true, "Show VWAP", group="Display")
+showBands = input.bool(true, "Show Sigma Bands", group="Display")
+showSLTP = input.bool(true, "Show SL/TP Lines", group="Display")
+deleteLinesOnExit = input.bool(true, "Delete Lines On Exit", group="Display")
+showConfluence = input.bool(true, "Show Confluence Score", tooltip="Shows how many filters passed", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+inLondon = enableLondon and not na(time(timeframe.period, londonSession, sessionTZ))
+inNY = enableNY and not na(time(timeframe.period, nySession, sessionTZ))
+inSession = enableAllDay or inLondon or inNY
+sessionID = inLondon ? 1 : inNY ? 2 : 0
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VWAP AND DEVIATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+vwapValue = ta.vwap(hlc3)
+stdev = devMode == "Mode 1" ? ta.stdev(close, devLen) : ta.stdev(close - vwapValue, devLen)
+
+upperEntry = vwapValue + sigmaEntry * stdev
+upperMax = vwapValue + sigmaMax * stdev
+lowerEntry = vwapValue - sigmaEntry * stdev
+lowerMax = vwapValue - sigmaMax * stdev
+
+inLongZone = close <= lowerEntry and close >= lowerMax
+inShortZone = close >= upperEntry and close <= upperMax
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFLUENCE FILTERS (OPTIONAL - SCORE BASED)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int confluenceLong = 0
+var int confluenceShort = 0
+
+// Filter 1: RSI Oversold/Overbought
+rsiValue = ta.rsi(close, rsiLen)
+rsiLongOK = not useRSI or rsiValue <= rsiOversold
+rsiShortOK = not useRSI or rsiValue >= rsiOverbought
+
+// Filter 2: Momentum Reversal (Bullish/Bearish Candle)
+isBullishCandle = close > open
+isBearishCandle = close < open
+momentumLongOK = not useMomentum or isBullishCandle
+momentumShortOK = not useMomentum or isBearishCandle
+
+// Filter 3: Wick Quality
+candleRange = high - low
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+wickLongOK = not useWickFilter or (candleRange > 0 and lowerWick / candleRange >= wickMinPct)
+wickShortOK = not useWickFilter or (candleRange > 0 and upperWick / candleRange >= wickMinPct)
+
+// Filter 4: 15m FVG Proximity
+[ctxHigh1, ctxLow1, ctxHigh3, ctxLow3] = request.security(syminfo.tickerid, contextTF, [high[1], low[1], high[3], low[3]], lookahead=barmerge.lookahead_off)
+
+var float bullFVGLow = na
+var float bullFVGHigh = na
+var float bearFVGLow = na
+var float bearFVGHigh = na
+
+if not na(ctxHigh1) and not na(ctxLow3) and ctxHigh1 < ctxLow3
+    bullFVGLow := ctxHigh1
+    bullFVGHigh := ctxLow3
+
+if not na(ctxLow1) and not na(ctxHigh3) and ctxLow1 > ctxHigh3
+    bearFVGLow := ctxHigh3
+    bearFVGHigh := ctxLow1
+
+bullFVGMid = not na(bullFVGLow) and not na(bullFVGHigh) ? (bullFVGLow + bullFVGHigh) / 2 : na
+bearFVGMid = not na(bearFVGLow) and not na(bearFVGHigh) ? (bearFVGLow + bearFVGHigh) / 2 : na
+
+nearBullFVG = not na(bullFVGMid) and math.abs(close - bullFVGMid) <= fvgProxPts
+nearBearFVG = not na(bearFVGMid) and math.abs(close - bearFVGMid) <= fvgProxPts
+
+fvgLongOK = not useFVG or nearBullFVG
+fvgShortOK = not useFVG or nearBearFVG
+
+// Filter 5: SMT Divergence (Optional)
+smtPH_Primary = request.security(syminfo.tickerid, "5", ta.pivothigh(high, 5, 3), lookahead=barmerge.lookahead_off)
+smtPL_Primary = request.security(syminfo.tickerid, "5", ta.pivotlow(low, 5, 3), lookahead=barmerge.lookahead_off)
+smtPH_Compare = request.security(smtSymbol, "5", ta.pivothigh(high, 5, 3), lookahead=barmerge.lookahead_off)
+smtPL_Compare = request.security(smtSymbol, "5", ta.pivotlow(low, 5, 3), lookahead=barmerge.lookahead_off)
+
+var float smtPrimaryPrevHigh = na
+var float smtPrimaryCurrHigh = na
+var float smtComparePrevHigh = na
+var float smtCompareCurrHigh = na
+var int smtHighUpdateBar = na
+
+var float smtPrimaryPrevLow = na
+var float smtPrimaryCurrLow = na
+var float smtComparePrevLow = na
+var float smtCompareCurrLow = na
+var int smtLowUpdateBar = na
+
+if not na(smtPH_Primary)
+    smtPrimaryPrevHigh := smtPrimaryCurrHigh
+    smtPrimaryCurrHigh := smtPH_Primary
+    smtHighUpdateBar := bar_index
+
+if not na(smtPH_Compare)
+    smtComparePrevHigh := smtCompareCurrHigh
+    smtCompareCurrHigh := smtPH_Compare
+
+if not na(smtPL_Primary)
+    smtPrimaryPrevLow := smtPrimaryCurrLow
+    smtPrimaryCurrLow := smtPL_Primary
+    smtLowUpdateBar := bar_index
+
+if not na(smtPL_Compare)
+    smtComparePrevLow := smtCompareCurrLow
+    smtCompareCurrLow := smtPL_Compare
+
+bearishSMT = not na(smtPrimaryCurrHigh) and not na(smtPrimaryPrevHigh) and not na(smtCompareCurrHigh) and not na(smtComparePrevHigh) and smtPrimaryCurrHigh > smtPrimaryPrevHigh and smtCompareCurrHigh <= smtComparePrevHigh and not na(smtHighUpdateBar) and (bar_index - smtHighUpdateBar) <= 15
+
+bullishSMT = not na(smtPrimaryCurrLow) and not na(smtPrimaryPrevLow) and not na(smtCompareCurrLow) and not na(smtComparePrevLow) and smtPrimaryCurrLow < smtPrimaryPrevLow and smtCompareCurrLow >= smtComparePrevLow and not na(smtLowUpdateBar) and (bar_index - smtLowUpdateBar) <= 15
+
+smtLongOK = not useSMT or bullishSMT
+smtShortOK = not useSMT or bearishSMT
+
+// Calculate Confluence Scores
+confluenceLong := 0
+confluenceShort := 0
+
+if rsiLongOK
+    confluenceLong += 1
+if momentumLongOK
+    confluenceLong += 1
+if wickLongOK
+    confluenceLong += 1
+if fvgLongOK
+    confluenceLong += 1
+
+if rsiShortOK
+    confluenceShort += 1
+if momentumShortOK
+    confluenceShort += 1
+if wickShortOK
+    confluenceShort += 1
+if fvgShortOK
+    confluenceShort += 1
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PIVOT DETECTION FOR STRUCTURE STOPS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+pivotHigh = ta.pivothigh(high, 5, 3)
+pivotLow = ta.pivotlow(low, 5, 3)
+
+var float lastSwingHigh = na
+var float lastSwingLow = na
+
+if not na(pivotHigh)
+    lastSwingHigh := pivotHigh
+if not na(pivotLow)
+    lastSwingLow := pivotLow
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SIGNAL MANAGEMENT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int signalsToday = 0
+var int lastSignalBar = -999
+var bool inTrade = false
+var int tradeDir = 0
+var float entryPrice = na
+var float slPrice = na
+var float tpPrice = na
+var bool longFiredThisSession = false
+var bool shortFiredThisSession = false
+var int lastSessionID = 0
+
+// Reset daily
+if ta.change(time("D", sessionTZ))
+    signalsToday := 0
+    longFiredThisSession := false
+    shortFiredThisSession := false
+
+// Reset per session
+if sessionID != lastSessionID and sessionID != 0
+    longFiredThisSession := false
+    shortFiredThisSession := false
+    lastSessionID := sessionID
+
+// Check trade exit
+if inTrade
+    if tradeDir == 1
+        if low <= slPrice or high >= tpPrice
+            inTrade := false
+            tradeDir := 0
+    else if tradeDir == -1
+        if high >= slPrice or low <= tpPrice
+            inTrade := false
+            tradeDir := 0
+
+// Signal allowed check
+cooldownOK = (bar_index - lastSignalBar) >= cooldownBars
+dailyLimitOK = signalsToday < maxSignalsPerDay
+directionOK_long = not onePerDirection or not longFiredThisSession
+directionOK_short = not onePerDirection or not shortFiredThisSession
+signalAllowed = not inTrade and inSession and cooldownOK and dailyLimitOK
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENTRY CONDITIONS (SIMPLIFIED)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+longSetup = inLongZone and confluenceLong >= minConfluence and directionOK_long
+shortSetup = inShortZone and confluenceShort >= minConfluence and directionOK_short
+
+// Calculate stops
+atrValue = ta.atr(atrLen)
+
+var float calcSL = na
+var float stopDist = na
+var bool validStop = true
+
+if longSetup
+    if useStructureStops and not na(lastSwingLow)
+        calcSL := lastSwingLow - slBufferPts
+    else
+        calcSL := close - (atrValue * atrMult)
+
+    stopDist := close - calcSL
+
+    if stopDist < minStopPts
+        calcSL := close - minStopPts
+        stopDist := minStopPts
+    else if stopDist > maxStopPts
+        if skipWideStops
+            validStop := false
+        else
+            calcSL := close - maxStopPts
+            stopDist := maxStopPts
+
+if shortSetup
+    if useStructureStops and not na(lastSwingHigh)
+        calcSL := lastSwingHigh + slBufferPts
+    else
+        calcSL := close + (atrValue * atrMult)
+
+    stopDist := calcSL - close
+
+    if stopDist < minStopPts
+        calcSL := close + minStopPts
+        stopDist := minStopPts
+    else if stopDist > maxStopPts
+        if skipWideStops
+            validStop := false
+        else
+            calcSL := close + maxStopPts
+            stopDist := maxStopPts
+
+// Generate signals
+buySignal = signalAllowed and longSetup and validStop
+sellSignal = signalAllowed and shortSetup and validStop
+
+// Execute trades
+if buySignal
+    entryPrice := close
+    slPrice := calcSL
+    tpPrice := entryPrice + rr * (entryPrice - slPrice)
+    inTrade := true
+    tradeDir := 1
+    signalsToday := signalsToday + 1
+    lastSignalBar := bar_index
+    longFiredThisSession := true
+
+if sellSignal
+    entryPrice := close
+    slPrice := calcSL
+    tpPrice := entryPrice - rr * (slPrice - entryPrice)
+    inTrade := true
+    tradeDir := -1
+    signalsToday := signalsToday + 1
+    lastSignalBar := bar_index
+    shortFiredThisSession := true
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PLOTTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Signals with confluence score
+buyLabel = showConfluence ? "BUY (" + str.tostring(confluenceLong) + "/4)" : "BUY"
+sellLabel = showConfluence ? "SELL (" + str.tostring(confluenceShort) + "/4)" : "SELL"
+
+plotshape(buySignal, title="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), text=buyLabel, size=size.normal)
+plotshape(sellSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text=sellLabel, size=size.normal)
+
+// VWAP and bands
+plot(showVWAP ? vwapValue : na, "VWAP", color=color.new(color.purple, 0), linewidth=2)
+plot(showBands ? upperEntry : na, "Upper Entry", color=color.new(color.red, 70), linewidth=1)
+plot(showBands ? upperMax : na, "Upper Max", color=color.new(color.red, 40), linewidth=1)
+plot(showBands ? lowerEntry : na, "Lower Entry", color=color.new(color.green, 70), linewidth=1)
+plot(showBands ? lowerMax : na, "Lower Max", color=color.new(color.green, 40), linewidth=1)
+
+// SL/TP Lines
+var line slLine = na
+var line tpLine = na
+
+if showSLTP
+    if buySignal or sellSignal
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        slLine := line.new(bar_index, slPrice, bar_index + 1, slPrice, color=color.red, style=line.style_dashed, width=2, extend=extend.right)
+        tpLine := line.new(bar_index, tpPrice, bar_index + 1, tpPrice, color=color.green, style=line.style_dashed, width=2, extend=extend.right)
+
+    if deleteLinesOnExit and not inTrade
+        if not na(slLine)
+            line.delete(slLine)
+            slLine := na
+        if not na(tpLine)
+            line.delete(tpLine)
+            tpLine := na
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="BUY", message="SMT PD-Array StdDev BUY - Confluence: {{plot_0}}")
+alertcondition(sellSignal, title="SELL", message="SMT PD-Array StdDev SELL - Confluence: {{plot_0}}")

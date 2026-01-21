@@ -1,0 +1,488 @@
+//@version=5
+indicator("Inverse FVG (iFVG) Precision Reversal", overlay=true, max_boxes_count=50, max_lines_count=100)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INSTITUTIONAL-GRADE iFVG REVERSAL INDICATOR
+// Detects Fair Value Gaps on higher timeframe, waits for INVERSION, confirms with
+// liquidity sweep + SMT + displacement, then marks the reversal zone with precise SL/TP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Timeframes
+ifvgTF = input.timeframe("3", "iFVG Detection Timeframe", tooltip="3m or 5m recommended", group="Timeframes")
+useHTFBias = input.bool(false, "Use HTF Bias Filter", group="Timeframes")
+htfBias = input.timeframe("60", "HTF Bias Timeframe", group="Timeframes")
+
+// Sessions
+sessionTZ = input.string("America/New_York", "Timezone", group="Sessions")
+sessionMode = input.string("London + NY", "Session Mode", options=["London + NY", "NY only", "Custom"], group="Sessions")
+enableLondon = input.bool(true, "Enable London", group="Sessions")
+londonSession = input.session("0200-0500", "London Session", group="Sessions")
+enableNY = input.bool(true, "Enable NY", group="Sessions")
+nySession = input.session("0930-1600", "NY Session", group="Sessions")
+
+// FVG Detection
+minFVGSize = input.float(8.0, "Min FVG Size (points)", minval=0, step=0.5, group="FVG Detection")
+maxFVGAge = input.int(50, "Max FVG Age (bars)", minval=10, maxval=200, group="FVG Detection")
+
+// Liquidity Sweep
+sweepMode = input.string("All", "Sweep Target", options=["Session High/Low", "Prior Day", "Swing", "All"], group="Liquidity Sweep")
+swingLookback = input.int(20, "Swing Lookback", minval=5, maxval=100, group="Liquidity Sweep")
+wickDominance = input.float(0.5, "Min Wick Dominance", minval=0.1, maxval=0.9, step=0.05, tooltip="Wick must be this % of candle", group="Liquidity Sweep")
+sweepBuffer = input.float(0.5, "Sweep Buffer (points)", minval=0, step=0.25, group="Liquidity Sweep")
+
+// SMT Divergence
+useSMT = input.bool(true, "Require SMT Divergence", group="SMT")
+smtSymbol = input.string("ES1!", "SMT Comparison Symbol", group="SMT")
+smtPivotLen = input.int(5, "SMT Pivot Length", minval=3, maxval=20, group="SMT")
+smtLookback = input.int(10, "SMT Sync Window", minval=5, maxval=30, group="SMT")
+
+// Displacement
+useDisplacement = input.bool(true, "Require Displacement", group="Displacement")
+atrLen = input.int(14, "ATR Length", group="Displacement")
+atrMult = input.float(1.0, "ATR Multiplier", minval=0.5, maxval=3.0, step=0.1, group="Displacement")
+
+// Micro BOS
+useMicroBOS = input.bool(false, "Require Micro BOS (Quality Mode)", group="Micro BOS")
+microBOSLen = input.int(3, "Micro BOS Pivot", minval=2, maxval=10, group="Micro BOS")
+
+// Risk Management
+slBuffer = input.float(2.0, "SL Buffer (points)", minval=0, step=0.5, group="Risk Management")
+rrRatio = input.float(3.0, "Risk:Reward Ratio", minval=1.0, maxval=10.0, step=0.5, group="Risk Management")
+deleteOnExit = input.bool(true, "Delete Lines on Exit", group="Risk Management")
+
+// Signal Control
+maxSignalsPerDay = input.int(3, "Max Signals Per Day", minval=1, maxval=10, group="Signal Control")
+maxSignalsPerSession = input.int(2, "Max Signals Per Session", minval=1, maxval=5, group="Signal Control")
+cooldownBars = input.int(20, "Cooldown Bars", minval=0, maxval=100, group="Signal Control")
+
+// Mode
+qualityMode = input.string("Balanced", "Quality Mode", options=["Quality", "Balanced", "Quantity"], tooltip="Quality=stricter, Quantity=more signals", group="Mode")
+
+// Display
+showEntry = input.bool(true, "Show Entry Line (50%)", group="Display")
+showSLTP = input.bool(true, "Show SL/TP Lines", group="Display")
+showLabels = input.bool(true, "Show Labels", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MODE ADJUSTMENTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+finalMinFVG = qualityMode == "Quality" ? minFVGSize * 1.5 : qualityMode == "Quantity" ? minFVGSize * 0.7 : minFVGSize
+finalWickDom = qualityMode == "Quality" ? wickDominance * 1.2 : wickDominance
+finalATRMult = qualityMode == "Quality" ? atrMult * 1.3 : qualityMode == "Quantity" ? atrMult * 0.8 : atrMult
+requireSMT = qualityMode == "Quality" ? true : useSMT
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+inLondon = enableLondon and not na(time(timeframe.period, londonSession, sessionTZ))
+inNY = enableNY and not na(time(timeframe.period, nySession, sessionTZ))
+
+inSession = false
+if sessionMode == "London + NY"
+    inSession := inLondon or inNY
+else if sessionMode == "NY only"
+    inSession := inNY
+else
+    inSession := inLondon or inNY
+
+sessionID = inLondon ? 1 : inNY ? 2 : 0
+
+// Session High/Low Tracking
+var float sessionHigh = na
+var float sessionLow = na
+var int sessionStartBar = na
+
+if ta.change(sessionID) and sessionID != 0
+    sessionHigh := high
+    sessionLow := low
+    sessionStartBar := bar_index
+else if inSession
+    sessionHigh := math.max(nz(sessionHigh, high), high)
+    sessionLow := math.min(nz(sessionLow, low), low)
+
+// Prior Day High/Low
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FVG DETECTION ON HIGHER TIMEFRAME
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Request HTF data
+[htf_high, htf_low, htf_high2, htf_low2, htf_close] = request.security(syminfo.tickerid, ifvgTF, [high, low, high[2], low[2], close], lookahead=barmerge.lookahead_off)
+
+// Bullish FVG: current low > high[2] (gap up)
+bullFVG = not na(htf_low) and not na(htf_high2) and htf_low > htf_high2
+bullFVGTop = bullFVG ? htf_low : na
+bullFVGBot = bullFVG ? htf_high2 : na
+bullFVGSize = bullFVG and not na(bullFVGTop) and not na(bullFVGBot) ? bullFVGTop - bullFVGBot : 0
+
+// Bearish FVG: current high < low[2] (gap down)
+bearFVG = not na(htf_high) and not na(htf_low2) and htf_high < htf_low2
+bearFVGTop = bearFVG ? htf_low2 : na
+bearFVGBot = bearFVG ? htf_high : na
+bearFVGSize = bearFVG and not na(bearFVGTop) and not na(bearFVGBot) ? bearFVGTop - bearFVGBot : 0
+
+// Store active untraded FVGs
+var array<float> activeBullFVGTops = array.new<float>()
+var array<float> activeBullFVGBots = array.new<float>()
+var array<int> activeBullFVGBars = array.new<int>()
+
+var array<float> activeBearFVGTops = array.new<float>()
+var array<float> activeBearFVGBots = array.new<float>()
+var array<int> activeBearFVGBars = array.new<int>()
+
+// Add new valid FVGs
+if bullFVG and bullFVGSize >= finalMinFVG and inSession
+    array.push(activeBullFVGTops, bullFVGTop)
+    array.push(activeBullFVGBots, bullFVGBot)
+    array.push(activeBullFVGBars, bar_index)
+
+if bearFVG and bearFVGSize >= finalMinFVG and inSession
+    array.push(activeBearFVGTops, bearFVGTop)
+    array.push(activeBearFVGBots, bearFVGBot)
+    array.push(activeBearFVGBars, bar_index)
+
+// Clean up old FVGs
+if array.size(activeBullFVGBars) > 0
+    for i = array.size(activeBullFVGBars) - 1 to 0
+        if bar_index - array.get(activeBullFVGBars, i) > maxFVGAge
+            array.remove(activeBullFVGBars, i)
+            array.remove(activeBullFVGTops, i)
+            array.remove(activeBullFVGBots, i)
+
+if array.size(activeBearFVGBars) > 0
+    for i = array.size(activeBearFVGBars) - 1 to 0
+        if bar_index - array.get(activeBearFVGBars, i) > maxFVGAge
+            array.remove(activeBearFVGBars, i)
+            array.remove(activeBearFVGTops, i)
+            array.remove(activeBearFVGBots, i)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVERSION DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Check for inversions (CLOSE through FVG, not just wick)
+var float detectedBullishIFVGTop = na
+var float detectedBullishIFVGBot = na
+var int detectedBullishIFVGBar = na
+var bool bullishIFVGActive = false
+
+var float detectedBearishIFVGTop = na
+var float detectedBearishIFVGBot = na
+var int detectedBearishIFVGBar = na
+var bool bearishIFVGActive = false
+
+// Bullish iFVG: price CLOSES ABOVE a bearish FVG (inversion)
+if array.size(activeBearFVGTops) > 0 and not bullishIFVGActive
+    for i = 0 to array.size(activeBearFVGTops) - 1
+        fvgTop = array.get(activeBearFVGTops, i)
+        fvgBot = array.get(activeBearFVGBots, i)
+        if close > fvgTop  // Closed through the gap
+            detectedBullishIFVGTop := fvgTop
+            detectedBullishIFVGBot := fvgBot
+            detectedBullishIFVGBar := bar_index
+            bullishIFVGActive := true
+            // Remove this FVG from active list
+            array.remove(activeBearFVGTops, i)
+            array.remove(activeBearFVGBots, i)
+            array.remove(activeBearFVGBars, i)
+            break
+
+// Bearish iFVG: price CLOSES BELOW a bullish FVG (inversion)
+if array.size(activeBullFVGBots) > 0 and not bearishIFVGActive
+    for i = 0 to array.size(activeBullFVGBots) - 1
+        fvgBot = array.get(activeBullFVGBots, i)
+        fvgTop = array.get(activeBullFVGTops, i)
+        if close < fvgBot  // Closed through the gap
+            detectedBearishIFVGTop := fvgTop
+            detectedBearishIFVGBot := fvgBot
+            detectedBearishIFVGBar := bar_index
+            bearishIFVGActive := true
+            // Remove this FVG from active list
+            array.remove(activeBullFVGBots, i)
+            array.remove(activeBullFVGTops, i)
+            array.remove(activeBullFVGBars, i)
+            break
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// LIQUIDITY SWEEP DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Swing pivots
+swingHigh = ta.highest(high, swingLookback)
+swingLow = ta.lowest(low, swingLookback)
+
+// Detect sweeps with wick rejection
+candleRange = high - low
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+hasLowerWick = candleRange > 0 and lowerWick / candleRange >= finalWickDom
+hasUpperWick = candleRange > 0 and upperWick / candleRange >= finalWickDom
+
+sweptHigh = false
+sweptLow = false
+
+// Check session high/low
+if (sweepMode == "Session High/Low" or sweepMode == "All") and not na(sessionHigh) and not na(sessionLow)
+    if high >= sessionHigh - sweepBuffer and close < sessionHigh and hasUpperWick
+        sweptHigh := true
+    if low <= sessionLow + sweepBuffer and close > sessionLow and hasLowerWick
+        sweptLow := true
+
+// Check prior day high/low
+if (sweepMode == "Prior Day" or sweepMode == "All") and not na(pdh) and not na(pdl)
+    if high >= pdh - sweepBuffer and close < pdh and hasUpperWick
+        sweptHigh := true
+    if low <= pdl + sweepBuffer and close > pdl and hasLowerWick
+        sweptLow := true
+
+// Check swing high/low
+if (sweepMode == "Swing" or sweepMode == "All")
+    if high >= swingHigh[1] - sweepBuffer and close < swingHigh[1] and hasUpperWick
+        sweptHigh := true
+    if low <= swingLow[1] + sweepBuffer and close > swingLow[1] and hasLowerWick
+        sweptLow := true
+
+liquiditySweepLong = sweptLow
+liquiditySweepShort = sweptHigh
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SMT DIVERGENCE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+nqPH = ta.pivothigh(high, smtPivotLen, smtPivotLen)
+nqPL = ta.pivotlow(low, smtPivotLen, smtPivotLen)
+esPH = request.security(smtSymbol, timeframe.period, ta.pivothigh(high, smtPivotLen, smtPivotLen), lookahead=barmerge.lookahead_off)
+esPL = request.security(smtSymbol, timeframe.period, ta.pivotlow(low, smtPivotLen, smtPivotLen), lookahead=barmerge.lookahead_off)
+
+var float nqPrevHigh = na
+var float nqCurrHigh = na
+var int nqHighBar = na
+var float esPrevHigh = na
+var float esCurrHigh = na
+
+var float nqPrevLow = na
+var float nqCurrLow = na
+var int nqLowBar = na
+var float esPrevLow = na
+var float esCurrLow = na
+
+if not na(nqPH)
+    nqPrevHigh := nqCurrHigh
+    nqCurrHigh := nqPH
+    nqHighBar := bar_index
+
+if not na(esPH)
+    esPrevHigh := esCurrHigh
+    esCurrHigh := esPH
+
+if not na(nqPL)
+    nqPrevLow := nqCurrLow
+    nqCurrLow := nqPL
+    nqLowBar := bar_index
+
+if not na(esPL)
+    esPrevLow := esCurrLow
+    esCurrLow := esPL
+
+// Bearish SMT: NQ makes higher high, ES doesn't
+bearishSMT = not na(nqCurrHigh) and not na(nqPrevHigh) and not na(esCurrHigh) and not na(esPrevHigh) and nqCurrHigh > nqPrevHigh and esCurrHigh <= esPrevHigh and not na(nqHighBar) and (bar_index - nqHighBar) <= smtLookback
+
+// Bullish SMT: NQ makes lower low, ES doesn't
+bullishSMT = not na(nqCurrLow) and not na(nqPrevLow) and not na(esCurrLow) and not na(esPrevLow) and nqCurrLow < nqPrevLow and esCurrLow >= esPrevLow and not na(nqLowBar) and (bar_index - nqLowBar) <= smtLookback
+
+smtLongOK = not requireSMT or bullishSMT
+smtShortOK = not requireSMT or bearishSMT
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DISPLACEMENT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+atrValue = ta.atr(atrLen)
+bodySize = math.abs(close - open)
+hasDisplacement = not useDisplacement or bodySize >= atrValue * finalATRMult
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MICRO BOS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+microPH = ta.pivothigh(high, microBOSLen, microBOSLen)
+microPL = ta.pivotlow(low, microBOSLen, microBOSLen)
+
+var float lastMicroHigh = na
+var float lastMicroLow = na
+
+if not na(microPH)
+    lastMicroHigh := microPH
+if not na(microPL)
+    lastMicroLow := microPL
+
+microBOSLong = not useMicroBOS or (not na(lastMicroHigh) and close > lastMicroHigh)
+microBOSShort = not useMicroBOS or (not na(lastMicroLow) and close < lastMicroLow)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SIGNAL MANAGEMENT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int signalsToday = 0
+var int signalsThisSession = 0
+var int lastSignalBar = -999
+var int lastSessionID = 0
+
+var bool inActiveTrade = false
+var float activeEntry = na
+var float activeSL = na
+var float activeTP = na
+var int activeTradeDir = 0
+
+if ta.change(time("D"))
+    signalsToday := 0
+
+if sessionID != lastSessionID and sessionID != 0
+    signalsThisSession := 0
+    lastSessionID := sessionID
+
+// Check if trade hit SL or TP
+if inActiveTrade
+    if activeTradeDir == 1  // Long
+        if low <= activeSL or high >= activeTP
+            inActiveTrade := false
+            bullishIFVGActive := false
+    else if activeTradeDir == -1  // Short
+        if high >= activeSL or low <= activeTP
+            inActiveTrade := false
+            bearishIFVGActive := false
+
+cooldownOK = bar_index - lastSignalBar >= cooldownBars
+dailyLimitOK = signalsToday < maxSignalsPerDay
+sessionLimitOK = signalsThisSession < maxSignalsPerSession
+signalAllowed = inSession and cooldownOK and dailyLimitOK and sessionLimitOK and not inActiveTrade
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FINAL SIGNAL CONDITIONS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+longConditions = bullishIFVGActive and liquiditySweepLong and smtLongOK and hasDisplacement and microBOSLong
+shortConditions = bearishIFVGActive and liquiditySweepShort and smtShortOK and hasDisplacement and microBOSShort
+
+longSignal = signalAllowed and longConditions
+shortSignal = signalAllowed and shortConditions
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DRAWING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var box ifvgBox = na
+var line entryLine = na
+var line slLine = na
+var line tpLine = na
+var label ifvgLabel = na
+
+if longSignal
+    ifvgTop = detectedBullishIFVGTop
+    ifvgBot = detectedBullishIFVGBot
+    entryPrice = (ifvgTop + ifvgBot) / 2
+    slPrice = ifvgBot - slBuffer
+    riskDist = entryPrice - slPrice
+    tpPrice = entryPrice + riskDist * rrRatio
+
+    // Delete old drawings
+    if not na(ifvgBox)
+        box.delete(ifvgBox)
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tpLine)
+        line.delete(tpLine)
+    if not na(ifvgLabel)
+        label.delete(ifvgLabel)
+
+    // Draw white iFVG box
+    ifvgBox := box.new(bar_index - 2, ifvgTop, bar_index + 30, ifvgBot, border_color=color.white, bgcolor=color.new(color.white, 85), border_width=2)
+
+    // Entry line at 50%
+    if showEntry
+        entryLine := line.new(bar_index, entryPrice, bar_index + 30, entryPrice, color=color.yellow, style=line.style_dashed, width=2, extend=extend.right)
+
+    // SL and TP lines
+    if showSLTP
+        slLine := line.new(bar_index, slPrice, bar_index + 30, slPrice, color=color.red, style=line.style_solid, width=2, extend=extend.right)
+        tpLine := line.new(bar_index, tpPrice, bar_index + 30, tpPrice, color=color.green, style=line.style_solid, width=2, extend=extend.right)
+
+    // Label
+    if showLabels
+        ifvgLabel := label.new(bar_index, ifvgBot, "iFVG LONG", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+
+    // Update state
+    signalsToday += 1
+    signalsThisSession += 1
+    lastSignalBar := bar_index
+    inActiveTrade := true
+    activeEntry := entryPrice
+    activeSL := slPrice
+    activeTP := tpPrice
+    activeTradeDir := 1
+    bullishIFVGActive := false
+
+if shortSignal
+    ifvgTop = detectedBearishIFVGTop
+    ifvgBot = detectedBearishIFVGBot
+    entryPrice = (ifvgTop + ifvgBot) / 2
+    slPrice = ifvgTop + slBuffer
+    riskDist = slPrice - entryPrice
+    tpPrice = entryPrice - riskDist * rrRatio
+
+    // Delete old drawings
+    if not na(ifvgBox)
+        box.delete(ifvgBox)
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tpLine)
+        line.delete(tpLine)
+    if not na(ifvgLabel)
+        label.delete(ifvgLabel)
+
+    // Draw white iFVG box
+    ifvgBox := box.new(bar_index - 2, ifvgTop, bar_index + 30, ifvgBot, border_color=color.white, bgcolor=color.new(color.white, 85), border_width=2)
+
+    // Entry line at 50%
+    if showEntry
+        entryLine := line.new(bar_index, entryPrice, bar_index + 30, entryPrice, color=color.yellow, style=line.style_dashed, width=2, extend=extend.right)
+
+    // SL and TP lines
+    if showSLTP
+        slLine := line.new(bar_index, slPrice, bar_index + 30, slPrice, color=color.red, style=line.style_solid, width=2, extend=extend.right)
+        tpLine := line.new(bar_index, tpPrice, bar_index + 30, tpPrice, color=color.green, style=line.style_solid, width=2, extend=extend.right)
+
+    // Label
+    if showLabels
+        ifvgLabel := label.new(bar_index, ifvgTop, "iFVG SHORT", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+
+    // Update state
+    signalsToday += 1
+    signalsThisSession += 1
+    lastSignalBar := bar_index
+    inActiveTrade := true
+    activeEntry := entryPrice
+    activeSL := slPrice
+    activeTP := tpPrice
+    activeTradeDir := -1
+    bearishIFVGActive := false
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(longSignal, title="iFVG LONG", message="Inverse FVG LONG signal - All confluences met")
+alertcondition(shortSignal, title="iFVG SHORT", message="Inverse FVG SHORT signal - All confluences met")

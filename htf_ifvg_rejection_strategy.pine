@@ -1,0 +1,464 @@
+//@version=5
+indicator("1H/5M IFVG Rejection Strategy", overlay=true, max_boxes_count=100, max_lines_count=200, max_labels_count=100)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INTRADAY FAIR VALUE GAP REJECTION STRATEGY
+// 1H Order Block/FVG zones + 5M wick rejection + IFVG formation + 50% CE entry
+// High-probability setups combining HTF zones, liquidity sweeps, and momentum shifts
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// HTF Settings
+htfTimeframe = input.timeframe("60", "HTF Timeframe (1H)", group="Higher Timeframe")
+minHTFFVGSize = input.float(10.0, "Min HTF FVG Size (points)", minval=0, step=1, group="Higher Timeframe")
+maxHTFZones = input.int(3, "Max HTF Zones to Track", minval=1, maxval=10, group="Higher Timeframe")
+
+// Rejection Settings
+wickRejectionMin = input.float(0.4, "Min Wick Rejection %", minval=0.1, maxval=0.9, step=0.05, tooltip="Wick must be this % of candle", group="Rejection")
+displacementFactor = input.float(1.2, "Displacement ATR Multiple", minval=0.5, maxval=3.0, step=0.1, group="Rejection")
+atrLength = input.int(14, "ATR Length", group="Rejection")
+
+// IFVG Settings
+ifvgLookback = input.int(10, "IFVG Lookback Bars", minval=3, maxval=50, tooltip="Look back this many bars for FVG to invert", group="IFVG")
+minIFVGSize = input.float(3.0, "Min IFVG Size (points)", minval=0, step=0.5, group="IFVG")
+
+// Entry Settings
+entryMode = input.string("CE (50%)", "Entry Mode", options=["CE (50%)", "Immediate"], tooltip="CE waits for 50% retracement", group="Entry")
+maxWaitBars = input.int(20, "Max Wait for CE Touch", minval=5, maxval=100, group="Entry")
+
+// Risk Management
+rrRatio = input.float(3.0, "Risk:Reward Ratio", minval=1.0, maxval=10.0, step=0.5, group="Risk Management")
+slBuffer = input.float(2.0, "SL Buffer (points)", minval=0, step=0.5, group="Risk Management")
+
+// Signal Control
+maxSignalsPerDay = input.int(2, "Max Signals Per Day", minval=1, maxval=10, group="Signal Control")
+
+// Display
+showHTFZones = input.bool(true, "Show HTF Zones", group="Display")
+showIFVGZones = input.bool(true, "Show IFVG Zones", group="Display")
+showCELines = input.bool(true, "Show CE Lines (50%)", group="Display")
+showSLTP = input.bool(true, "Show SL/TP Lines", group="Display")
+showLabels = input.bool(true, "Show Labels", group="Display")
+showArrows = input.bool(true, "Show Entry Arrows", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HELPER FUNCTIONS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+atr = ta.atr(atrLength)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 1H FVG DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[htf_high, htf_low, htf_high2, htf_low2] = request.security(syminfo.tickerid, htfTimeframe, [high[1], low[1], high[3], low[3]], lookahead=barmerge.lookahead_off)
+
+// Bullish HTF FVG: low[1] > high[3] (gap up)
+htfBullFVG = not na(htf_low) and not na(htf_high2) and htf_low > htf_high2
+htfBullFVGTop = htfBullFVG ? htf_low : na
+htfBullFVGBot = htfBullFVG ? htf_high2 : na
+htfBullFVGSize = htfBullFVG and not na(htfBullFVGTop) and not na(htfBullFVGBot) ? htfBullFVGTop - htfBullFVGBot : 0
+
+// Bearish HTF FVG: high[1] < low[3] (gap down)
+htfBearFVG = not na(htf_high) and not na(htf_low2) and htf_high < htf_low2
+htfBearFVGTop = htfBearFVG ? htf_low2 : na
+htfBearFVGBot = htfBearFVG ? htf_high : na
+htfBearFVGSize = htfBearFVG and not na(htfBearFVGTop) and not na(htfBearFVGBot) ? htfBearFVGTop - htfBearFVGBot : 0
+
+// Store valid HTF zones
+var array<float> activeBullZoneTops = array.new<float>()
+var array<float> activeBullZoneBots = array.new<float>()
+var array<int> activeBullZoneBars = array.new<int>()
+
+var array<float> activeBearZoneTops = array.new<float>()
+var array<float> activeBearZoneBots = array.new<float>()
+var array<int> activeBearZoneBars = array.new<int>()
+
+// Add new valid HTF FVGs
+if htfBullFVG and htfBullFVGSize >= minHTFFVGSize
+    if array.size(activeBullZoneTops) < maxHTFZones
+        array.push(activeBullZoneTops, htfBullFVGTop)
+        array.push(activeBullZoneBots, htfBullFVGBot)
+        array.push(activeBullZoneBars, bar_index)
+
+if htfBearFVG and htfBearFVGSize >= minHTFFVGSize
+    if array.size(activeBearZoneTops) < maxHTFZones
+        array.push(activeBearZoneTops, htfBearFVGTop)
+        array.push(activeBearZoneBots, htfBearFVGBot)
+        array.push(activeBearZoneBars, bar_index)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 5M FVG DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Bullish 5M FVG: low[1] > high[3]
+bull5MFVG = low[1] > high[3]
+bull5MFVGTop = bull5MFVG ? low[1] : na
+bull5MFVGBot = bull5MFVG ? high[3] : na
+
+// Bearish 5M FVG: high[1] < low[3]
+bear5MFVG = high[1] < low[3]
+bear5MFVGTop = bear5MFVG ? low[3] : na
+bear5MFVGBot = bear5MFVG ? high[1] : na
+
+// Track recent 5M FVGs for inversion detection
+var array<float> recent5MBullFVGTops = array.new<float>()
+var array<float> recent5MBullFVGBots = array.new<float>()
+var array<int> recent5MBullFVGBars = array.new<int>()
+
+var array<float> recent5MBearFVGTops = array.new<float>()
+var array<float> recent5MBearFVGBots = array.new<float>()
+var array<int> recent5MBearFVGBars = array.new<int>()
+
+if bull5MFVG and not na(bull5MFVGTop) and not na(bull5MFVGBot)
+    array.push(recent5MBullFVGTops, bull5MFVGTop)
+    array.push(recent5MBullFVGBots, bull5MFVGBot)
+    array.push(recent5MBullFVGBars, bar_index)
+
+if bear5MFVG and not na(bear5MFVGTop) and not na(bear5MFVGBot)
+    array.push(recent5MBearFVGTops, bear5MFVGTop)
+    array.push(recent5MBearFVGBots, bear5MFVGBot)
+    array.push(recent5MBearFVGBars, bar_index)
+
+// Clean old 5M FVGs
+if array.size(recent5MBullFVGBars) > 0
+    for i = array.size(recent5MBullFVGBars) - 1 to 0
+        if bar_index - array.get(recent5MBullFVGBars, i) > ifvgLookback
+            array.remove(recent5MBullFVGBars, i)
+            array.remove(recent5MBullFVGTops, i)
+            array.remove(recent5MBullFVGBots, i)
+
+if array.size(recent5MBearFVGBars) > 0
+    for i = array.size(recent5MBearFVGBars) - 1 to 0
+        if bar_index - array.get(recent5MBearFVGBars, i) > ifvgLookback
+            array.remove(recent5MBearFVGBars, i)
+            array.remove(recent5MBearFVGTops, i)
+            array.remove(recent5MBearFVGBots, i)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// WICK REJECTION DETECTION AT HTF ZONE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var bool bullishRejectionDetected = false
+var float bullishRejectionZoneTop = na
+var float bullishRejectionZoneBot = na
+var float bullishRejectionSwingLow = na
+var int bullishRejectionBar = na
+
+var bool bearishRejectionDetected = false
+var float bearishRejectionZoneTop = na
+var float bearishRejectionZoneBot = na
+var float bearishRejectionSwingHigh = na
+var int bearishRejectionBar = na
+
+candleRange = high - low
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+
+hasLowerWick = candleRange > 0 and lowerWick / candleRange >= wickRejectionMin
+hasUpperWick = candleRange > 0 and upperWick / candleRange >= wickRejectionMin
+bodySize = math.abs(close - open)
+hasDisplacement = bodySize >= displacementFactor * atr
+
+// Check for bullish rejection (wick into bull zone, close above, displacement up)
+if not bullishRejectionDetected and array.size(activeBullZoneBots) > 0
+    for i = 0 to array.size(activeBullZoneBots) - 1
+        zoneTop = array.get(activeBullZoneTops, i)
+        zoneBot = array.get(activeBullZoneBots, i)
+
+        // Wick into zone, close above zone
+        if low <= zoneTop and close > zoneTop and hasLowerWick
+            // Check if next bar or current shows displacement up
+            if close > open and hasDisplacement
+                bullishRejectionDetected := true
+                bullishRejectionZoneTop := zoneTop
+                bullishRejectionZoneBot := zoneBot
+                bullishRejectionSwingLow := low
+                bullishRejectionBar := bar_index
+                break
+
+// Check for bearish rejection (wick into bear zone, close below, displacement down)
+if not bearishRejectionDetected and array.size(activeBearZoneBots) > 0
+    for i = 0 to array.size(activeBearZoneBots) - 1
+        zoneTop = array.get(activeBearZoneTops, i)
+        zoneBot = array.get(activeBearZoneBots, i)
+
+        // Wick into zone, close below zone
+        if high >= zoneBot and close < zoneBot and hasUpperWick
+            // Check if shows displacement down
+            if close < open and hasDisplacement
+                bearishRejectionDetected := true
+                bearishRejectionZoneTop := zoneTop
+                bearishRejectionZoneBot := zoneBot
+                bearishRejectionSwingHigh := high
+                bearishRejectionBar := bar_index
+                break
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IFVG DETECTION (INVERSION)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float bullishIFVGTop = na
+var float bullishIFVGBot = na
+var float bullishIFVGMid = na
+var int bullishIFVGBar = na
+var bool bullishIFVGActive = false
+
+var float bearishIFVGTop = na
+var float bearishIFVGBot = na
+var float bearishIFVGMid = na
+var int bearishIFVGBar = na
+var bool bearishIFVGActive = false
+
+// Bullish IFVG: After bullish rejection, look for bearish 5M FVG that gets invalidated (close above)
+if bullishRejectionDetected and not bullishIFVGActive
+    if array.size(recent5MBearFVGTops) > 0
+        for i = array.size(recent5MBearFVGTops) - 1 to 0
+            fvgTop = array.get(recent5MBearFVGTops, i)
+            fvgBot = array.get(recent5MBearFVGBots, i)
+            fvgBar = array.get(recent5MBearFVGBars, i)
+
+            // Check if this FVG formed after or near the rejection
+            if fvgBar >= bullishRejectionBar - 2
+                // Check if price closed above this bearish FVG (invalidation = IFVG)
+                if close > fvgTop and (fvgTop - fvgBot) >= minIFVGSize
+                    bullishIFVGTop := fvgTop
+                    bullishIFVGBot := fvgBot
+                    bullishIFVGMid := (fvgTop + fvgBot) / 2
+                    bullishIFVGBar := bar_index
+                    bullishIFVGActive := true
+                    bullishRejectionDetected := false
+                    break
+
+// Bearish IFVG: After bearish rejection, look for bullish 5M FVG that gets invalidated (close below)
+if bearishRejectionDetected and not bearishIFVGActive
+    if array.size(recent5MBullFVGTops) > 0
+        for i = array.size(recent5MBullFVGTops) - 1 to 0
+            fvgTop = array.get(recent5MBullFVGTops, i)
+            fvgBot = array.get(recent5MBullFVGBots, i)
+            fvgBar = array.get(recent5MBullFVGBars, i)
+
+            // Check if this FVG formed after or near the rejection
+            if fvgBar >= bearishRejectionBar - 2
+                // Check if price closed below this bullish FVG (invalidation = IFVG)
+                if close < fvgBot and (fvgTop - fvgBot) >= minIFVGSize
+                    bearishIFVGTop := fvgTop
+                    bearishIFVGBot := fvgBot
+                    bearishIFVGMid := (fvgTop + fvgBot) / 2
+                    bearishIFVGBar := bar_index
+                    bearishIFVGActive := true
+                    bearishRejectionDetected := false
+                    break
+
+// Timeout IFVGs if too old
+if bullishIFVGActive and (bar_index - bullishIFVGBar) > maxWaitBars
+    bullishIFVGActive := false
+
+if bearishIFVGActive and (bar_index - bearishIFVGBar) > maxWaitBars
+    bearishIFVGActive := false
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SIGNAL MANAGEMENT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int signalsToday = 0
+var int lastSignalDay = 0
+
+currentDay = dayofmonth(time)
+
+if currentDay != lastSignalDay
+    signalsToday := 0
+    lastSignalDay := currentDay
+
+dailyLimitOK = signalsToday < maxSignalsPerDay
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENTRY TRIGGER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+var bool inTrade = false
+
+// Bullish entry: IFVG active + price touches CE (50%)
+bullishEntry = false
+if bullishIFVGActive and not inTrade and dailyLimitOK and not na(bullishIFVGMid)
+    if entryMode == "CE (50%)"
+        // Wait for price to touch the midpoint
+        if low <= bullishIFVGMid and close > bullishIFVGMid
+            entryPrice := bullishIFVGMid
+            stopLoss := bullishRejectionSwingLow - slBuffer
+            riskDist = entryPrice - stopLoss
+            takeProfit := entryPrice + (riskDist * rrRatio)
+            bullishEntry := true
+            bullishIFVGActive := false
+            inTrade := true
+    else
+        // Immediate entry on IFVG formation
+        if bar_index == bullishIFVGBar
+            entryPrice := close
+            stopLoss := bullishRejectionSwingLow - slBuffer
+            riskDist = entryPrice - stopLoss
+            takeProfit := entryPrice + (riskDist * rrRatio)
+            bullishEntry := true
+            bullishIFVGActive := false
+            inTrade := true
+
+// Bearish entry: IFVG active + price touches CE (50%)
+bearishEntry = false
+if bearishIFVGActive and not inTrade and dailyLimitOK and not na(bearishIFVGMid)
+    if entryMode == "CE (50%)"
+        // Wait for price to touch the midpoint
+        if high >= bearishIFVGMid and close < bearishIFVGMid
+            entryPrice := bearishIFVGMid
+            stopLoss := bearishRejectionSwingHigh + slBuffer
+            riskDist = stopLoss - entryPrice
+            takeProfit := entryPrice - (riskDist * rrRatio)
+            bearishEntry := true
+            bearishIFVGActive := false
+            inTrade := true
+    else
+        // Immediate entry on IFVG formation
+        if bar_index == bearishIFVGBar
+            entryPrice := close
+            stopLoss := bearishRejectionSwingHigh + slBuffer
+            riskDist = stopLoss - entryPrice
+            takeProfit := entryPrice - (riskDist * rrRatio)
+            bearishEntry := true
+            bearishIFVGActive := false
+            inTrade := true
+
+// Update counters
+if bullishEntry or bearishEntry
+    signalsToday += 1
+
+// Check if trade hit SL or TP
+if inTrade
+    if not na(stopLoss) and not na(takeProfit)
+        if entryPrice > stopLoss  // Long trade
+            if low <= stopLoss or high >= takeProfit
+                inTrade := false
+        else  // Short trade
+            if high >= stopLoss or low <= takeProfit
+                inTrade := false
+
+// Final signals (global scope for plotshape)
+buySignal = bullishEntry
+sellSignal = bearishEntry
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL PLOTTING - HTF ZONES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var array<box> bullZoneBoxes = array.new<box>()
+var array<box> bearZoneBoxes = array.new<box>()
+
+if showHTFZones
+    // Draw bullish HTF zones
+    if array.size(activeBullZoneBots) > 0
+        for i = 0 to array.size(activeBullZoneBots) - 1
+            zoneTop = array.get(activeBullZoneTops, i)
+            zoneBot = array.get(activeBullZoneBots, i)
+            zoneBar = array.get(activeBullZoneBars, i)
+
+            if i < array.size(bullZoneBoxes)
+                b = array.get(bullZoneBoxes, i)
+                if not na(b)
+                    box.set_right(b, bar_index)
+            else
+                newBox = box.new(zoneBar, zoneTop, bar_index, zoneBot, border_color=color.new(color.gray, 50), bgcolor=color.new(color.gray, 90), border_width=1)
+                array.push(bullZoneBoxes, newBox)
+
+    // Draw bearish HTF zones
+    if array.size(activeBearZoneBots) > 0
+        for i = 0 to array.size(activeBearZoneBots) - 1
+            zoneTop = array.get(activeBearZoneTops, i)
+            zoneBot = array.get(activeBearZoneBots, i)
+            zoneBar = array.get(activeBearZoneBars, i)
+
+            if i < array.size(bearZoneBoxes)
+                b = array.get(bearZoneBoxes, i)
+                if not na(b)
+                    box.set_right(b, bar_index)
+            else
+                newBox = box.new(zoneBar, zoneTop, bar_index, zoneBot, border_color=color.new(color.gray, 50), bgcolor=color.new(color.gray, 90), border_width=1)
+                array.push(bearZoneBoxes, newBox)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL PLOTTING - IFVG ZONES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var box bullIFVGBox = na
+var line bullCELine = na
+var box bearIFVGBox = na
+var line bearCELine = na
+
+if showIFVGZones
+    if bullishIFVGActive and bar_index == bullishIFVGBar
+        if not na(bullIFVGBox)
+            box.delete(bullIFVGBox)
+        if not na(bullCELine)
+            line.delete(bullCELine)
+
+        bullIFVGBox := box.new(bullishIFVGBar, bullishIFVGTop, bar_index + 20, bullishIFVGBot, border_color=color.new(color.green, 40), bgcolor=color.new(color.green, 85), border_width=1)
+
+        if showCELines
+            bullCELine := line.new(bullishIFVGBar, bullishIFVGMid, bar_index + 20, bullishIFVGMid, color=color.new(color.yellow, 30), style=line.style_dashed, width=2)
+
+    if bearishIFVGActive and bar_index == bearishIFVGBar
+        if not na(bearIFVGBox)
+            box.delete(bearIFVGBox)
+        if not na(bearCELine)
+            line.delete(bearCELine)
+
+        bearIFVGBox := box.new(bearishIFVGBar, bearishIFVGTop, bar_index + 20, bearishIFVGBot, border_color=color.new(color.red, 40), bgcolor=color.new(color.maroon, 85), border_width=1)
+
+        if showCELines
+            bearCELine := line.new(bearishIFVGBar, bearishIFVGMid, bar_index + 20, bearishIFVGMid, color=color.new(color.yellow, 30), style=line.style_dashed, width=2)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL PLOTTING - SL/TP LINES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var line slLine = na
+var line tpLine = na
+var label slLabel = na
+var label tpLabel = na
+
+if showSLTP and (buySignal or sellSignal)
+    // Delete old lines
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tpLine)
+        line.delete(tpLine)
+    if not na(slLabel)
+        label.delete(slLabel)
+    if not na(tpLabel)
+        label.delete(tpLabel)
+
+    // Draw new SL/TP
+    slLine := line.new(bar_index, stopLoss, bar_index + 1, stopLoss, color=color.red, style=line.style_solid, width=2, extend=extend.right)
+    tpLine := line.new(bar_index, takeProfit, bar_index + 1, takeProfit, color=color.green, style=line.style_solid, width=2, extend=extend.right)
+
+    if showLabels
+        slLabel := label.new(bar_index, stopLoss, "SL", style=label.style_label_left, color=color.red, textcolor=color.white, size=size.tiny)
+        tpLabel := label.new(bar_index, takeProfit, "TP", style=label.style_label_left, color=color.green, textcolor=color.white, size=size.tiny)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENTRY ARROWS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if showArrows
+    plotshape(buySignal, title="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), text="BUY", size=size.normal)
+    plotshape(sellSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", size=size.normal)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="IFVG BUY", message="1H/5M IFVG Rejection Strategy BUY - All confluences met")
+alertcondition(sellSignal, title="IFVG SELL", message="1H/5M IFVG Rejection Strategy SELL - All confluences met")

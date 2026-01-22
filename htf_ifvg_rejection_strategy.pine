@@ -13,8 +13,8 @@ indicator("1H/5M IFVG Rejection Strategy", overlay=true, max_boxes_count=100, ma
 
 // HTF Settings
 htfTimeframe = input.timeframe("60", "HTF Timeframe (1H)", group="Higher Timeframe")
-minHTFFVGSize = input.float(10.0, "Min HTF FVG Size (points)", minval=0, step=1, group="Higher Timeframe")
-maxHTFZones = input.int(3, "Max HTF Zones to Track", minval=1, maxval=10, group="Higher Timeframe")
+minHTFFVGSize = input.float(0.0, "Min HTF FVG Size (points)", minval=0, step=1, group="Higher Timeframe", tooltip="Set to 0 to show all FVGs")
+maxHTFZones = input.int(5, "Max HTF Zones to Track", minval=1, maxval=10, group="Higher Timeframe")
 
 // Rejection Settings
 wickRejectionMin = input.float(0.4, "Min Wick Rejection %", minval=0.1, maxval=0.9, step=0.05, tooltip="Wick must be this % of candle", group="Rejection")
@@ -43,6 +43,7 @@ showCELines = input.bool(true, "Show CE Lines (50%)", group="Display")
 showSLTP = input.bool(true, "Show SL/TP Lines", group="Display")
 showLabels = input.bool(true, "Show Labels", group="Display")
 showArrows = input.bool(true, "Show Entry Arrows", group="Display")
+debugMode = input.bool(true, "Debug Mode (Show All FVGs)", group="Display", tooltip="Shows all detected FVGs regardless of filters")
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // HELPER FUNCTIONS
@@ -78,17 +79,24 @@ var array<float> activeBearZoneBots = array.new<float>()
 var array<int> activeBearZoneBars = array.new<int>()
 
 // Add new valid HTF FVGs
-if htfBullFVG and htfBullFVGSize >= minHTFFVGSize
+validBullFVG = htfBullFVG and (debugMode or htfBullFVGSize >= minHTFFVGSize)
+validBearFVG = htfBearFVG and (debugMode or htfBearFVGSize >= minHTFFVGSize)
+
+if validBullFVG
     if array.size(activeBullZoneTops) < maxHTFZones
         array.push(activeBullZoneTops, htfBullFVGTop)
         array.push(activeBullZoneBots, htfBullFVGBot)
         array.push(activeBullZoneBars, bar_index)
 
-if htfBearFVG and htfBearFVGSize >= minHTFFVGSize
+if validBearFVG
     if array.size(activeBearZoneTops) < maxHTFZones
         array.push(activeBearZoneTops, htfBearFVGTop)
         array.push(activeBearZoneBots, htfBearFVGBot)
         array.push(activeBearZoneBars, bar_index)
+
+// Debug: Mark HTF FVG detection
+plotchar(debugMode and htfBullFVG, "HTF Bull FVG", "▲", location.belowbar, color.new(color.green, 60), size=size.tiny)
+plotchar(debugMode and htfBearFVG, "HTF Bear FVG", "▼", location.abovebar, color.new(color.red, 60), size=size.tiny)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 5M FVG DETECTION
@@ -370,7 +378,7 @@ if showHTFZones
                 if not na(b)
                     box.set_right(b, bar_index)
             else
-                newBox = box.new(zoneBar, zoneTop, bar_index, zoneBot, border_color=color.new(color.gray, 50), bgcolor=color.new(color.gray, 90), border_width=1)
+                newBox = box.new(zoneBar, zoneTop, bar_index, zoneBot, border_color=color.new(color.blue, 30), bgcolor=color.new(color.blue, 92), border_width=2, text="HTF BULL", text_color=color.new(color.blue, 50), text_size=size.small)
                 array.push(bullZoneBoxes, newBox)
 
     // Draw bearish HTF zones
@@ -385,7 +393,7 @@ if showHTFZones
                 if not na(b)
                     box.set_right(b, bar_index)
             else
-                newBox = box.new(zoneBar, zoneTop, bar_index, zoneBot, border_color=color.new(color.gray, 50), bgcolor=color.new(color.gray, 90), border_width=1)
+                newBox = box.new(zoneBar, zoneTop, bar_index, zoneBot, border_color=color.new(color.orange, 30), bgcolor=color.new(color.orange, 92), border_width=2, text="HTF BEAR", text_color=color.new(color.orange, 50), text_size=size.small)
                 array.push(bearZoneBoxes, newBox)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -461,3 +469,13 @@ plotshape(showArrows and sellSignal, title="SELL", style=shape.labeldown, locati
 
 alertcondition(buySignal, title="IFVG BUY", message="1H/5M IFVG Rejection Strategy BUY - All confluences met")
 alertcondition(sellSignal, title="IFVG SELL", message="1H/5M IFVG Rejection Strategy SELL - All confluences met")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DEBUG INFO
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Plot zone counts (helps verify detection is working)
+plot(debugMode ? array.size(activeBullZoneBots) : na, "Bull Zones", color.new(color.blue, 0), 2, plot.style_histogram)
+plot(debugMode ? array.size(activeBearZoneBots) : na, "Bear Zones", color.new(color.orange, 0), 2, plot.style_histogram)
+plot(debugMode ? (bullishRejectionDetected ? 1 : 0) : na, "Bull Rejection", color.green, 1, plot.style_circles)
+plot(debugMode ? (bearishRejectionDetected ? 1 : 0) : na, "Bear Rejection", color.red, 1, plot.style_circles)

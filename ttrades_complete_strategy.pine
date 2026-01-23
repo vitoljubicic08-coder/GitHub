@@ -15,8 +15,9 @@ indicator("TTrades Complete Strategy - Optimized", overlay=true, max_boxes_count
 tfConfirm = input.timeframe("60", "HTF Confirmation (1H/4H)", options=["60", "240"], group="Timeframes", tooltip="Higher timeframe for CISD confirmation")
 
 // Entry Pattern Settings
-minConsecutiveBars = input.int(2, "Min Consecutive Bars for OB", minval=1, maxval=5, group="Entry Pattern", tooltip="Minimum bars in opposite color before continuation")
-requireSweep = input.bool(false, "Require Liquidity Sweep", group="Entry Pattern", tooltip="Must sweep recent high/low before continuation")
+minConsecutiveBars = input.int(3, "Min Consecutive Bars for OB", minval=1, maxval=5, group="Entry Pattern", tooltip="Minimum bars in opposite color before continuation")
+requireSweep = input.bool(true, "Require Liquidity Sweep", group="Entry Pattern", tooltip="Must sweep recent high/low before continuation")
+minBodySize = input.float(0.5, "Min Body Size (ATR Multiple)", minval=0.1, maxval=2.0, step=0.1, group="Entry Pattern", tooltip="Minimum body size for continuation candle")
 
 // Display Settings
 showDailyBias = input.bool(true, "Show Daily Bias", group="Display")
@@ -63,6 +64,9 @@ else
 
 bool dailyBiasBullish = (dailyBias == "BULLISH")
 bool dailyBiasBearish = (dailyBias == "BEARISH")
+
+// ATR for body size filtering
+atr = ta.atr(14)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // STEP 2: HTF CHANGE IN STATE OF DELIVERY (CISD)
@@ -150,28 +154,36 @@ calcSeriesLow(int bars) =>
 // Bullish Order Block: Current bar bullish, closes above recent bearish series
 bool bullishOB = false
 if currentBullish and consecutiveBears >= minConsecutiveBars
-    seriesHigh = calcSeriesHigh(consecutiveBears)
-    bullishOB := close > seriesHigh
+    bodySize = math.abs(close - open)
+    hasSufficientBody = bodySize >= (minBodySize * atr)
 
-    // Optional: Check for liquidity sweep (low went below recent low before closing higher)
-    if requireSweep
-        recentLow = low[1]
-        for i = 2 to consecutiveBears
-            recentLow := math.min(recentLow, low[i])
-        bullishOB := bullishOB and (low < recentLow)
+    if hasSufficientBody
+        seriesHigh = calcSeriesHigh(consecutiveBears)
+        bullishOB := close > seriesHigh
+
+        // Check for liquidity sweep (low went below recent low before closing higher)
+        if requireSweep
+            recentLow = low[1]
+            for i = 2 to consecutiveBears
+                recentLow := math.min(recentLow, low[i])
+            bullishOB := bullishOB and (low < recentLow)
 
 // Bearish Order Block: Current bar bearish, closes below recent bullish series
 bool bearishOB = false
 if currentBearish and consecutiveBulls >= minConsecutiveBars
-    seriesLow = calcSeriesLow(consecutiveBulls)
-    bearishOB := close < seriesLow
+    bodySize = math.abs(close - open)
+    hasSufficientBody = bodySize >= (minBodySize * atr)
 
-    // Optional: Check for liquidity sweep
-    if requireSweep
-        recentHigh = high[1]
-        for i = 2 to consecutiveBulls
-            recentHigh := math.max(recentHigh, high[i])
-        bearishOB := bearishOB and (high > recentHigh)
+    if hasSufficientBody
+        seriesLow = calcSeriesLow(consecutiveBulls)
+        bearishOB := close < seriesLow
+
+        // Check for liquidity sweep
+        if requireSweep
+            recentHigh = high[1]
+            for i = 2 to consecutiveBulls
+                recentHigh := math.max(recentHigh, high[i])
+            bearishOB := bearishOB and (high > recentHigh)
 
 // Update consecutive counters AFTER pattern detection
 if currentBullish
@@ -194,7 +206,7 @@ bool sellSignal = dailyBiasBearish and bearSwingConfirmed and bearishOB
 
 // Track signals per day (limit to avoid overtrading)
 var int signalsToday = 0
-var int maxSignalsPerDay = 3
+var int maxSignalsPerDay = 2
 
 if newDay
     signalsToday := 0

@@ -240,11 +240,18 @@ if debugMode
         if not na(debugLabel)
             label.delete(debugLabel)
 
-        biasType = bullishContinuation ? "Bull Cont" : bullishReversal ? "Bull Rev" : bearishContinuation ? "Bear Cont" : bearishReversal ? "Bear Rev" : "Inside"
-        debugText = "Bias: " + dailyBias + " (" + biasType + ")\n" +
-                    "Bull Conf: " + str.tostring(bullSwingConfirmed) + "\n" +
-                    "Bear Conf: " + str.tostring(bearSwingConfirmed) + "\n" +
-                    "Signals Today: " + str.tostring(signalsToday)
+        // Determine bias type
+        string biasType = "Inside"
+        if bullishContinuation
+            biasType := "Bull Cont"
+        else if bullishReversal
+            biasType := "Bull Rev"
+        else if bearishContinuation
+            biasType := "Bear Cont"
+        else if bearishReversal
+            biasType := "Bear Rev"
+
+        debugText = "Bias: " + dailyBias + " (" + biasType + ")\n" + "Bull Conf: " + str.tostring(bullSwingConfirmed) + "\n" + "Bear Conf: " + str.tostring(bearSwingConfirmed) + "\n" + "Signals Today: " + str.tostring(signalsToday)
 
         debugLabel := label.new(bar_index, high, debugText, style=label.style_label_down, color=color.new(color.gray, 80), textcolor=color.white, size=size.small)
 

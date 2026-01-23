@@ -1,0 +1,261 @@
+//@version=5
+indicator("TTrades Complete Strategy - Optimized", overlay=true, max_boxes_count=50, max_lines_count=100)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TTRADES COMPLETE STRATEGY
+// Multi-Timeframe Bias → HTF Confirmation → LTF Entry
+// Daily Bias → 1H/4H CISD → 5M/15M Continuation Order Block
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Timeframe Settings
+tfConfirm = input.timeframe("60", "HTF Confirmation (1H/4H)", options=["60", "240"], group="Timeframes", tooltip="Higher timeframe for CISD confirmation")
+
+// Entry Pattern Settings
+minConsecutiveBars = input.int(2, "Min Consecutive Bars for OB", minval=1, maxval=5, group="Entry Pattern", tooltip="Minimum bars in opposite color before continuation")
+requireSweep = input.bool(false, "Require Liquidity Sweep", group="Entry Pattern", tooltip="Must sweep recent high/low before continuation")
+
+// Display Settings
+showDailyBias = input.bool(true, "Show Daily Bias", group="Display")
+showHTFConfirm = input.bool(true, "Show HTF Confirmation", group="Display")
+showDailyLevels = input.bool(true, "Show Daily High/Low", group="Display")
+showSignals = input.bool(true, "Show Entry Signals", group="Display")
+debugMode = input.bool(false, "Debug Mode (Show All Info)", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1: DAILY BIAS DETERMINATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Get previous two daily candles
+[d1_high, d1_low, d1_close, d1_open] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1], open[1]], lookahead=barmerge.lookahead_off)
+[d2_high, d2_low] = request.security(syminfo.tickerid, "D", [high[2], low[2]], lookahead=barmerge.lookahead_off)
+
+// Daily Bias Logic
+var string dailyBias = "NEUTRAL"
+var color biasColor = color.gray
+
+// Bullish Continuation: Yesterday closed above day-before-yesterday's high
+bullishContinuation = d1_close > d2_high
+
+// Bearish Continuation: Yesterday closed below day-before-yesterday's low
+bearishContinuation = d1_close < d2_low
+
+// Bullish Reversal: Yesterday swept below prior low but closed back above it
+bullishReversal = (d1_low < d2_low) and (d1_close > d2_low)
+
+// Bearish Reversal: Yesterday swept above prior high but closed back below it
+bearishReversal = (d1_high > d2_high) and (d1_close < d2_high)
+
+// Set bias
+if bullishContinuation or bullishReversal
+    dailyBias := "BULLISH"
+    biasColor := color.new(color.green, 80)
+else if bearishContinuation or bearishReversal
+    dailyBias := "BEARISH"
+    biasColor := color.new(color.red, 80)
+else
+    // Inside day - use candle color
+    dailyBias := (d1_close > d1_open) ? "BULLISH" : "BEARISH"
+    biasColor := (d1_close > d1_open) ? color.new(color.green, 90) : color.new(color.red, 90)
+
+bool dailyBiasBullish = (dailyBias == "BULLISH")
+bool dailyBiasBearish = (dailyBias == "BEARISH")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 2: HTF CHANGE IN STATE OF DELIVERY (CISD)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Get HTF candle data
+[htf_high, htf_low, htf_high1, htf_low1, htf_close, htf_high2, htf_low2, htf_close1] = request.security(
+     syminfo.tickerid,
+     tfConfirm,
+     [high, low, high[1], low[1], close, high[2], low[2], close[1]],
+     lookahead=barmerge.lookahead_off)
+
+// Candle 2 Bullish Closure: Sweep previous low, close back above it
+bullC2 = (htf_low < htf_low1) and (htf_close > htf_low1)
+
+// Candle 3 Bullish Closure: Previous didn't reverse, current closes above previous high
+prevNotBullC2 = not ((htf_low1 < htf_low2) and (htf_close1 > htf_low2))
+bullC3 = prevNotBullC2 and (htf_close > htf_high1)
+
+// Candle 2 Bearish Closure: Sweep previous high, close back below it
+bearC2 = (htf_high > htf_high1) and (htf_close < htf_high1)
+
+// Candle 3 Bearish Closure: Previous didn't reverse, current closes below previous low
+prevNotBearC2 = not ((htf_high1 > htf_high2) and (htf_close1 < htf_high2))
+bearC3 = prevNotBearC2 and (htf_close < htf_low1)
+
+// CISD Confirmed
+bool htfBullishCISD = (bullC2 or bullC3)
+bool htfBearishCISD = (bearC2 or bearC3)
+
+// Track confirmation state (persists until new day or opposite signal)
+var bool bullSwingConfirmed = false
+var bool bearSwingConfirmed = false
+
+newDay = ta.change(time("D"))
+if newDay
+    bullSwingConfirmed := false
+    bearSwingConfirmed := false
+    // Auto-confirm for continuation bias days
+    if bullishContinuation
+        bullSwingConfirmed := true
+    if bearishContinuation
+        bearSwingConfirmed := true
+
+// Update confirmation when HTF signals occur
+if htfBullishCISD and dailyBiasBullish
+    bullSwingConfirmed := true
+    bearSwingConfirmed := false
+
+if htfBearishCISD and dailyBiasBearish
+    bearSwingConfirmed := true
+    bullSwingConfirmed := false
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 3: LTF CONTINUATION ORDER BLOCK PATTERN
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Track consecutive candle colors
+var int consecutiveBears = 0
+var int consecutiveBulls = 0
+
+if newDay
+    consecutiveBears := 0
+    consecutiveBulls := 0
+
+// Current bar direction
+bool currentBullish = close > open
+bool currentBearish = close < open
+bool currentDoji = close == open
+
+// Calculate highest high of recent bearish series
+calcSeriesHigh(int bars) =>
+    float result = high[1]
+    for i = 2 to math.min(bars, 20)
+        result := math.max(result, high[i])
+    result
+
+// Calculate lowest low of recent bullish series
+calcSeriesLow(int bars) =>
+    float result = low[1]
+    for i = 2 to math.min(bars, 20)
+        result := math.min(result, low[i])
+    result
+
+// Bullish Order Block: Current bar bullish, closes above recent bearish series
+bool bullishOB = false
+if currentBullish and consecutiveBears >= minConsecutiveBars
+    seriesHigh = calcSeriesHigh(consecutiveBears)
+    bullishOB := close > seriesHigh
+
+    // Optional: Check for liquidity sweep (low went below recent low before closing higher)
+    if requireSweep
+        recentLow = low[1]
+        for i = 2 to consecutiveBears
+            recentLow := math.min(recentLow, low[i])
+        bullishOB := bullishOB and (low < recentLow)
+
+// Bearish Order Block: Current bar bearish, closes below recent bullish series
+bool bearishOB = false
+if currentBearish and consecutiveBulls >= minConsecutiveBars
+    seriesLow = calcSeriesLow(consecutiveBulls)
+    bearishOB := close < seriesLow
+
+    // Optional: Check for liquidity sweep
+    if requireSweep
+        recentHigh = high[1]
+        for i = 2 to consecutiveBulls
+            recentHigh := math.max(recentHigh, high[i])
+        bearishOB := bearishOB and (high > recentHigh)
+
+// Update consecutive counters AFTER pattern detection
+if currentBullish
+    consecutiveBulls += 1
+    consecutiveBears := 0
+else if currentBearish
+    consecutiveBears += 1
+    consecutiveBulls := 0
+else if currentDoji
+    consecutiveBears := 0
+    consecutiveBulls := 0
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 4: GENERATE SIGNALS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// All conditions must align
+bool buySignal = dailyBiasBullish and bullSwingConfirmed and bullishOB
+bool sellSignal = dailyBiasBearish and bearSwingConfirmed and bearishOB
+
+// Track signals per day (limit to avoid overtrading)
+var int signalsToday = 0
+var int maxSignalsPerDay = 3
+
+if newDay
+    signalsToday := 0
+
+if (buySignal or sellSignal) and signalsToday < maxSignalsPerDay
+    signalsToday += 1
+else if signalsToday >= maxSignalsPerDay
+    buySignal := false
+    sellSignal := false
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL PLOTTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Daily Bias Background
+bgcolor(showDailyBias ? biasColor : na, title="Daily Bias Background")
+
+// Daily High/Low Lines
+var line dailyHighLine = na
+var line dailyLowLine = na
+
+if showDailyLevels and newDay
+    if not na(dailyHighLine)
+        line.delete(dailyHighLine)
+    if not na(dailyLowLine)
+        line.delete(dailyLowLine)
+
+    dailyHighLine := line.new(bar_index, d1_high, bar_index + 1, d1_high, color=color.new(color.blue, 30), style=line.style_dashed, width=1, extend=extend.right)
+    dailyLowLine := line.new(bar_index, d1_low, bar_index + 1, d1_low, color=color.new(color.orange, 30), style=line.style_dashed, width=1, extend=extend.right)
+
+// Entry Signals
+plotshape(showSignals and buySignal, title="BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, size=size.normal)
+plotshape(showSignals and sellSignal, title="SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+
+// HTF Confirmation Markers
+plotchar(showHTFConfirm and htfBullishCISD and dailyBiasBullish, "HTF Bull CISD", "●", location.bottom, color.new(color.green, 40), size=size.tiny)
+plotchar(showHTFConfirm and htfBearishCISD and dailyBiasBearish, "HTF Bear CISD", "●", location.top, color.new(color.red, 40), size=size.tiny)
+
+// Debug Info
+if debugMode
+    var label debugLabel = na
+    if newDay
+        if not na(debugLabel)
+            label.delete(debugLabel)
+
+        biasType = bullishContinuation ? "Bull Cont" : bullishReversal ? "Bull Rev" : bearishContinuation ? "Bear Cont" : bearishReversal ? "Bear Rev" : "Inside"
+        debugText = "Bias: " + dailyBias + " (" + biasType + ")\n" +
+                    "Bull Conf: " + str.tostring(bullSwingConfirmed) + "\n" +
+                    "Bear Conf: " + str.tostring(bearSwingConfirmed) + "\n" +
+                    "Signals Today: " + str.tostring(signalsToday)
+
+        debugLabel := label.new(bar_index, high, debugText, style=label.style_label_down, color=color.new(color.gray, 80), textcolor=color.white, size=size.small)
+
+// Plot consecutive bar counts (debug)
+plot(debugMode ? consecutiveBears : na, "Consec Bears", color.red, 1, plot.style_histogram)
+plot(debugMode ? consecutiveBulls : na, "Consec Bulls", color.green, 1, plot.style_histogram)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="TTrades BUY", message="TTrades Strategy BUY - All conditions met (Daily Bias + HTF CISD + LTF OB)")
+alertcondition(sellSignal, title="TTrades SELL", message="TTrades Strategy SELL - All conditions met (Daily Bias + HTF CISD + LTF OB)")
+alertcondition(newDay, title="New Trading Day", message="New day started - Daily bias updated")

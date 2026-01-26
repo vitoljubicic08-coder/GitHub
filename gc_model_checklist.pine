@@ -392,11 +392,7 @@ if debugMode
         if not na(debugLabel)
             label.delete(debugLabel)
 
-        debugText = "Session: " + str.tostring(inSession) + "\n" +
-                    "Wick Taps PDA: " + str.tostring(wickTapsBullPDA or wickTapsBearPDA) + "\n" +
-                    "CVD Exhaustion: " + str.tostring(bullishExhaustion or bearishExhaustion) + "\n" +
-                    "Inside Bar: " + str.tostring(insideBar) + "\n" +
-                    "A+ Setup: " + str.tostring(aPlusBullish or aPlusBearish)
+        debugText = "Session: " + str.tostring(inSession) + "\n" + "Wick Taps PDA: " + str.tostring(wickTapsBullPDA or wickTapsBearPDA) + "\n" + "CVD Exhaustion: " + str.tostring(bullishExhaustion or bearishExhaustion) + "\n" + "Inside Bar: " + str.tostring(insideBar) + "\n" + "A+ Setup: " + str.tostring(aPlusBullish or aPlusBearish)
 
         debugLabel := label.new(bar_index, high, debugText, style=label.style_label_down, color=color.new(color.gray, 80), textcolor=color.white, size=size.tiny)
 

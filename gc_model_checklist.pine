@@ -1,0 +1,408 @@
+//@version=5
+indicator("GC Model Checklist (400 Risk)", overlay=true, max_boxes_count=100, max_lines_count=200, max_labels_count=100)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GC MODEL CHECKLIST - EXACT IMPLEMENTATION
+// Best TF: H1 (or M15) | Session: 2AM-1PM NY | Risk: 400
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Session
+startHour = input.int(2, "Session Start (NY)", minval=0, maxval=23, group="Session")
+endHour = input.int(13, "Session End (NY)", minval=0, maxval=23, group="Session")
+
+// Wick Settings
+wickRatio = input.float(2.0, "Min Wick/Body Ratio", minval=1.0, maxval=5.0, step=0.5, group="Wick")
+minWickATR = input.float(0.3, "Min Wick Size (ATR)", minval=0.1, maxval=1.0, step=0.1, group="Wick")
+
+// PD Array
+fvgLookback = input.int(20, "FVG Lookback", minval=5, maxval=100, group="PD Array")
+showPDA = input.bool(true, "Show PD Arrays", group="PD Array")
+
+// CVD Exhaustion
+cvdLookback = input.int(5, "CVD Lookback", minval=3, maxval=20, group="CVD")
+requireCVDExhaustion = input.bool(true, "Require CVD Exhaustion (MUST)", group="CVD")
+
+// Entry Trigger
+useM1OB = input.bool(true, "Use M1 OB Entry Trigger", group="Entry Trigger", tooltip="Wait for 1-minute order block confirmation")
+ceBuffer = input.float(0.3, "CE Buffer (ticks)", minval=0.0, maxval=1.0, step=0.1, group="Entry Trigger")
+obBuffer = input.float(1.0, "OB Limit Buffer (ticks)", minval=0.0, maxval=2.0, step=0.1, group="Entry Trigger")
+
+// Risk Management
+defaultSL = input.float(2.1, "Default SL (pts)", minval=0.5, maxval=5.0, step=0.1, group="Risk", tooltip="Max 2.1 pts, min 0.9-1.0 pts")
+useDynamicSL = input.bool(false, "Use OB Dynamic SL", group="Risk", tooltip="1 tick above/below OB high/low")
+minSL = input.float(0.9, "Minimum SL (pts)", minval=0.5, maxval=2.0, step=0.1, group="Risk")
+targetTP = input.float(8.0, "Target TP (pts)", minval=5.0, maxval=10.0, step=0.5, group="Risk")
+maxTP = input.float(10.0, "Max TP (pts)", minval=8.0, maxval=15.0, step=0.5, group="Risk")
+breakEven = input.float(3.2, "Break Even (pts)", minval=2.0, maxval=5.0, step=0.1, group="Risk")
+
+// Display
+showWicks = input.bool(true, "Mark Valid Wicks", group="Display")
+showCE = input.bool(true, "Show Wick CE (50%)", group="Display")
+showSLTP = input.bool(true, "Show SL/TP Levels", group="Display")
+debugMode = input.bool(false, "Debug Mode", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONSTANTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+tickSize = syminfo.mintick  // 0.1 for GC
+pointValue = 10.0           // $10 per 1.0 point move in GC
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION FILTER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+timezoneNY = "America/New_York"
+nyHour = hour(time, timezoneNY)
+inSession = (nyHour >= startHour and nyHour < endHour)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PD ARRAY (FVG) DETECTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Fair Value Gap Detection
+bullFVG = (low[1] > high[3])
+bearFVG = (high[1] < low[3])
+
+// Track active FVG zones
+var array<float> bullFVGTops = array.new<float>()
+var array<float> bullFVGBots = array.new<float>()
+var array<int> bullFVGBars = array.new<int>()
+
+var array<float> bearFVGTops = array.new<float>()
+var array<float> bearFVGBots = array.new<float>()
+var array<int> bearFVGBars = array.new<int>()
+
+if bullFVG
+    if array.size(bullFVGTops) < 10
+        array.push(bullFVGTops, low[1])
+        array.push(bullFVGBots, high[3])
+        array.push(bullFVGBars, bar_index)
+
+if bearFVG
+    if array.size(bearFVGTops) < 10
+        array.push(bearFVGTops, low[3])
+        array.push(bearFVGBots, high[1])
+        array.push(bearFVGBars, bar_index)
+
+// Clean old FVGs
+if array.size(bullFVGBars) > 0
+    for i = array.size(bullFVGBars) - 1 to 0
+        if bar_index - array.get(bullFVGBars, i) > fvgLookback
+            array.remove(bullFVGBars, i)
+            array.remove(bullFVGTops, i)
+            array.remove(bullFVGBots, i)
+
+if array.size(bearFVGBars) > 0
+    for i = array.size(bearFVGBars) - 1 to 0
+        if bar_index - array.get(bearFVGBars, i) > fvgLookback
+            array.remove(bearFVGBars, i)
+            array.remove(bearFVGTops, i)
+            array.remove(bearFVGBots, i)
+
+// Check if current wick taps PDA
+bool wickTapsBullPDA = false
+bool wickTapsBearPDA = false
+
+if array.size(bullFVGTops) > 0
+    for i = 0 to array.size(bullFVGTops) - 1
+        top = array.get(bullFVGTops, i)
+        bot = array.get(bullFVGBots, i)
+        if low <= top and low >= bot
+            wickTapsBullPDA := true
+            break
+
+if array.size(bearFVGTops) > 0
+    for i = 0 to array.size(bearFVGTops) - 1
+        top = array.get(bearFVGTops, i)
+        bot = array.get(bearFVGBots, i)
+        if high >= bot and high <= top
+            wickTapsBearPDA := true
+            break
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CVD EXHAUSTION (MUST HAVE)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Approximate CVD
+volumeDelta = close > open ? volume : close < open ? -volume : 0
+var float cvd = 0.0
+cvd += volumeDelta
+
+// Detect exhaustion: GC sweeps but CVD doesn't
+bool bullishExhaustion = false
+bool bearishExhaustion = false
+
+// Get recent price and CVD extremes
+priceHigh = ta.highest(high, cvdLookback)
+priceLow = ta.lowest(low, cvdLookback)
+cvdHigh = ta.highest(cvd, cvdLookback)
+cvdLow = ta.lowest(cvd, cvdLookback)
+
+// Bullish exhaustion: New low in price but CVD doesn't make new low (buyers absorbing)
+if low <= priceLow[1] and cvd > cvdLow[1]
+    bullishExhaustion := true
+
+// Bearish exhaustion: New high in price but CVD doesn't make new high (sellers rejecting)
+if high >= priceHigh[1] and cvd < cvdHigh[1]
+    bearishExhaustion := true
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// A+ WICK CRITERIA
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+atr = ta.atr(14)
+body = math.abs(close - open)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+// Wick must be multiple of body AND meet ATR minimum
+validUpperWick = (upperWick >= wickRatio * body) and (upperWick >= minWickATR * atr)
+validLowerWick = (lowerWick >= wickRatio * body) and (lowerWick >= minWickATR * atr)
+
+// Close back in range of previous candle (inside bar - the "+" criteria)
+insideBar = (high <= high[1] and low >= low[1])
+
+// Check for double wick (DON'T TAKE)
+prevHigh = high[1]
+prevLow = low[1]
+tookBothSides = (high > prevHigh and low < prevLow)
+
+// Exception: selling wick that closed below previous low can work
+sellingWickException = validUpperWick and (close < prevLow) and not (low < prevLow)
+
+// Valid wick conditions
+validBullishWick = validLowerWick and insideBar and not (tookBothSides and not sellingWickException)
+validBearishWick = validUpperWick and insideBar and not (tookBothSides and not sellingWickException)
+
+// A+ Setup requirements
+aPlusBullish = validBullishWick and (wickTapsBullPDA or bullishExhaustion) and (requireCVDExhaustion ? bullishExhaustion : true)
+aPlusBearish = validBearishWick and (wickTapsBearPDA or bearishExhaustion) and (requireCVDExhaustion ? bearishExhaustion : true)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// WICK CE (CONSEQUENT ENCROACHMENT)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float bullWickCE = na
+var float bearWickCE = na
+var float bullWickHigh = na
+var float bullWickLow = na
+var float bearWickHigh = na
+var float bearWickLow = na
+
+// Store wick CE when A+ setup forms
+if aPlusBullish
+    bullWickLow := low
+    bullWickHigh := math.min(open, close)
+    bullWickCE := (bullWickLow + bullWickHigh) / 2
+
+if aPlusBearish
+    bearWickHigh := high
+    bearWickLow := math.max(open, close)
+    bearWickCE := (bearWickHigh + bearWickLow) / 2
+
+// Check if price hit CE with buffer
+ceBufferPoints = ceBuffer * tickSize
+bool hitBullCE = not na(bullWickCE) and (low <= bullWickCE + ceBufferPoints)
+bool hitBearCE = not na(bearWickCE) and (high >= bearWickCE - ceBufferPoints)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// M1 ORDER BLOCK (ENTRY TRIGGER)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Get M1 data for OB detection
+[m1_open, m1_high, m1_low, m1_close] = request.security(syminfo.tickerid, "1", [open, high, low, close], lookahead=barmerge.lookahead_off)
+
+// M1 OB: Single candle that formed the block (use body)
+m1Body = math.abs(m1_close - m1_open)
+m1IsBullish = m1_close > m1_open
+m1IsBearish = m1_close < m1_open
+
+// For bullish OB: last bearish M1 candle before bullish move
+var float bullOBTop = na
+var float bullOBBot = na
+var bool bullOBFormed = false
+
+// For bearish OB: last bullish M1 candle before bearish move
+var float bearOBTop = na
+var float bearOBBot = na
+var bool bearOBFormed = false
+
+// Detect OB formation (single candle only)
+if hitBullCE and m1IsBearish[1] and m1IsBullish
+    bullOBTop := math.max(m1_open[1], m1_close[1])  // Use body
+    bullOBBot := math.min(m1_open[1], m1_close[1])
+    bullOBFormed := true
+
+if hitBearCE and m1IsBullish[1] and m1IsBearish
+    bearOBTop := math.max(m1_open[1], m1_close[1])  // Use body
+    bearOBBot := math.min(m1_open[1], m1_close[1])
+    bearOBFormed := true
+
+// Entry trigger: price touches OB with buffer
+obBufferPoints = obBuffer * tickSize
+bool bullEntry = bullOBFormed and (low <= bullOBTop + obBufferPoints)
+bool bearEntry = bearOBFormed and (high >= bearOBBot - obBufferPoints)
+
+// Without M1 OB, just use CE hit
+if not useM1OB
+    bullEntry := hitBullCE
+    bearEntry := hitBearCE
+
+// Final signals
+bool buySignal = inSession and aPlusBullish and bullEntry
+bool sellSignal = inSession and aPlusBearish and bearEntry
+
+// Reset after signal taken
+if buySignal
+    bullWickCE := na
+    bullOBFormed := false
+
+if sellSignal
+    bearWickCE := na
+    bearOBFormed := false
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SL/TP CALCULATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+
+if buySignal
+    entryPrice := useM1OB ? bullOBTop : bullWickCE
+
+    // SL: 1 tick below OB (if dynamic) or default 2.1 pts
+    if useDynamicSL and not na(bullOBBot)
+        stopLoss := bullOBBot - tickSize
+        // Ensure minimum SL
+        if (entryPrice - stopLoss) < minSL
+            stopLoss := entryPrice - defaultSL
+    else
+        stopLoss := entryPrice - defaultSL
+
+    // TP: 6-10 pts, max 10 pts
+    takeProfit := entryPrice + math.min(targetTP, maxTP)
+
+if sellSignal
+    entryPrice := useM1OB ? bearOBBot : bearWickCE
+
+    // SL: 1 tick above OB (if dynamic) or default 2.1 pts
+    if useDynamicSL and not na(bearOBTop)
+        stopLoss := bearOBTop + tickSize
+        // Ensure minimum SL
+        if (stopLoss - entryPrice) < minSL
+            stopLoss := entryPrice + defaultSL
+    else
+        stopLoss := entryPrice + defaultSL
+
+    // TP: 6-10 pts, max 10 pts
+    takeProfit := entryPrice - math.min(targetTP, maxTP)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL PLOTTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Session background
+bgcolor(inSession ? color.new(color.blue, 97) : na, title="NY Session")
+
+// PD Array zones
+var array<box> bullFVGBoxes = array.new<box>()
+var array<box> bearFVGBoxes = array.new<box>()
+
+if showPDA
+    if array.size(bullFVGTops) > 0
+        for i = 0 to array.size(bullFVGTops) - 1
+            top = array.get(bullFVGTops, i)
+            bot = array.get(bullFVGBots, i)
+            barIdx = array.get(bullFVGBars, i)
+
+            if i < array.size(bullFVGBoxes)
+                b = array.get(bullFVGBoxes, i)
+                if not na(b)
+                    box.set_right(b, bar_index)
+            else
+                newBox = box.new(barIdx, top, bar_index, bot, border_color=color.new(color.green, 70), bgcolor=color.new(color.green, 92), border_width=1, text="Discount")
+                array.push(bullFVGBoxes, newBox)
+
+    if array.size(bearFVGTops) > 0
+        for i = 0 to array.size(bearFVGTops) - 1
+            top = array.get(bearFVGTops, i)
+            bot = array.get(bearFVGBots, i)
+            barIdx = array.get(bearFVGBars, i)
+
+            if i < array.size(bearFVGBoxes)
+                b = array.get(bearFVGBoxes, i)
+                if not na(b)
+                    box.set_right(b, bar_index)
+            else
+                newBox = box.new(barIdx, top, bar_index, bot, border_color=color.new(color.red, 70), bgcolor=color.new(color.red, 92), border_width=1, text="Premium")
+                array.push(bearFVGBoxes, newBox)
+
+// Mark valid A+ wicks
+plotchar(showWicks and aPlusBullish, "A+ Bull Wick", "▲", location.belowbar, color.green, size=size.small)
+plotchar(showWicks and aPlusBearish, "A+ Bear Wick", "▼", location.abovebar, color.red, size=size.small)
+
+// Wick CE lines
+var line bullCELine = na
+var line bearCELine = na
+
+if showCE and not na(bullWickCE)
+    if not na(bullCELine)
+        line.delete(bullCELine)
+    bullCELine := line.new(bar_index, bullWickCE, bar_index + 20, bullWickCE, color=color.new(color.yellow, 30), style=line.style_dashed, width=2)
+
+if showCE and not na(bearWickCE)
+    if not na(bearCELine)
+        line.delete(bearCELine)
+    bearCELine := line.new(bar_index, bearWickCE, bar_index + 20, bearWickCE, color=color.new(color.yellow, 30), style=line.style_dashed, width=2)
+
+// Entry signals
+plotshape(buySignal, title="BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, size=size.normal)
+plotshape(sellSignal, title="SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+
+// SL/TP lines
+var line slLine = na
+var line tpLine = na
+var line beLine = na
+
+if showSLTP and (buySignal or sellSignal)
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tpLine)
+        line.delete(tpLine)
+    if not na(beLine)
+        line.delete(beLine)
+
+    slLine := line.new(bar_index, stopLoss, bar_index + 1, stopLoss, color=color.red, style=line.style_solid, width=2, extend=extend.right)
+    tpLine := line.new(bar_index, takeProfit, bar_index + 1, takeProfit, color=color.green, style=line.style_solid, width=2, extend=extend.right)
+
+    beLevel = buySignal ? entryPrice + breakEven : entryPrice - breakEven
+    beLine := line.new(bar_index, beLevel, bar_index + 1, beLevel, color=color.blue, style=line.style_dotted, width=1, extend=extend.right)
+
+// Debug info
+if debugMode
+    var label debugLabel = na
+    if bar_index % 5 == 0
+        if not na(debugLabel)
+            label.delete(debugLabel)
+
+        debugText = "Session: " + str.tostring(inSession) + "\n" +
+                    "Wick Taps PDA: " + str.tostring(wickTapsBullPDA or wickTapsBearPDA) + "\n" +
+                    "CVD Exhaustion: " + str.tostring(bullishExhaustion or bearishExhaustion) + "\n" +
+                    "Inside Bar: " + str.tostring(insideBar) + "\n" +
+                    "A+ Setup: " + str.tostring(aPlusBullish or aPlusBearish)
+
+        debugLabel := label.new(bar_index, high, debugText, style=label.style_label_down, color=color.new(color.gray, 80), textcolor=color.white, size=size.tiny)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="GC BUY (400 Risk)", message="GC Model BUY - A+ Wick + PDA + CVD Exhaustion + CE Hit")
+alertcondition(sellSignal, title="GC SELL (400 Risk)", message="GC Model SELL - A+ Wick + PDA + CVD Exhaustion + CE Hit")

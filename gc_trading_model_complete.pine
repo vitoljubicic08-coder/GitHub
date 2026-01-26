@@ -1,0 +1,349 @@
+//@version=5
+indicator("GC Trading Model - Complete", overlay=true, max_boxes_count=50, max_lines_count=100)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GC TRADING MODEL - COMPLETE IMPLEMENTATION
+// NY Session 2AM-1PM | PD Array | Wick Rejection | CVD Divergence | Inside Bar
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Time Filter
+startHour = input.int(2, "NY Session Start Hour", minval=0, maxval=23, group="Session Time")
+endHour = input.int(13, "NY Session End Hour", minval=0, maxval=23, group="Session Time")
+
+// Wick Rejection Settings
+wickMultiple = input.float(2.0, "Wick/Body Ratio", minval=1.0, maxval=5.0, step=0.5, group="Wick Rejection", tooltip="Wick must be this multiple of body size")
+minWickSize = input.float(0.3, "Min Wick Size (ATR %)", minval=0.1, maxval=1.0, step=0.1, group="Wick Rejection")
+
+// PD Array Settings
+fvgLookback = input.int(20, "FVG Lookback", minval=5, maxval=100, group="PD Array")
+obLookback = input.int(10, "Order Block Lookback", minval=3, maxval=50, group="PD Array")
+showPDZones = input.bool(true, "Show PD Array Zones", group="PD Array")
+
+// CVD Settings
+cvdSensitivity = input.int(5, "CVD Divergence Lookback", minval=3, maxval=20, group="CVD Exhaustion")
+minDivergenceBars = input.int(3, "Min Divergence Bars", minval=2, maxval=10, group="CVD Exhaustion")
+
+// Three Ticks Rule
+threeTicksEnabled = input.bool(true, "Enable Three Ticks Rule", group="Three Ticks")
+minTickRetracement = input.int(3, "Min Tick Retracement", minval=1, maxval=10, group="Three Ticks", tooltip="Minimum ticks of retracement required")
+
+// Display
+showSignals = input.bool(true, "Show Signals", group="Display")
+showInsideBars = input.bool(true, "Show Inside Bars", group="Display")
+debugMode = input.bool(false, "Debug Mode", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TIME FILTER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+timezoneNY = "America/New_York"
+int nyHour = hour(time, timezoneNY)
+bool inTradingHours = (nyHour >= startHour and nyHour < endHour)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PD ARRAY DETECTION (PREMIUM/DISCOUNT ZONES)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Fair Value Gap Detection
+bullFVG = (low[1] > high[3])
+bearFVG = (high[1] < low[3])
+
+bullFVGTop = bullFVG ? low[1] : na
+bullFVGBot = bullFVG ? high[3] : na
+bearFVGTop = bearFVG ? low[3] : na
+bearFVGBot = bearFVG ? high[1] : na
+
+// Track active FVG zones
+var array<float> activeBullFVGTops = array.new<float>()
+var array<float> activeBullFVGBots = array.new<float>()
+var array<int> activeBullFVGBars = array.new<int>()
+
+var array<float> activeBearFVGTops = array.new<float>()
+var array<float> activeBearFVGBots = array.new<float>()
+var array<int> activeBearFVGBars = array.new<int>()
+
+// Add new FVGs
+if bullFVG and not na(bullFVGTop) and not na(bullFVGBot)
+    if array.size(activeBullFVGTops) < 5
+        array.push(activeBullFVGTops, bullFVGTop)
+        array.push(activeBullFVGBots, bullFVGBot)
+        array.push(activeBullFVGBars, bar_index)
+
+if bearFVG and not na(bearFVGTop) and not na(bearFVGBot)
+    if array.size(activeBearFVGTops) < 5
+        array.push(activeBearFVGTops, bearFVGTop)
+        array.push(activeBearFVGBots, bearFVGBot)
+        array.push(activeBearFVGBars, bar_index)
+
+// Clean old FVGs
+if array.size(activeBullFVGBars) > 0
+    for i = array.size(activeBullFVGBars) - 1 to 0
+        if bar_index - array.get(activeBullFVGBars, i) > fvgLookback
+            array.remove(activeBullFVGBars, i)
+            array.remove(activeBullFVGTops, i)
+            array.remove(activeBullFVGBots, i)
+
+if array.size(activeBearFVGBars) > 0
+    for i = array.size(activeBearFVGBars) - 1 to 0
+        if bar_index - array.get(activeBearFVGBars, i) > fvgLookback
+            array.remove(activeBearFVGBars, i)
+            array.remove(activeBearFVGTops, i)
+            array.remove(activeBearFVGBots, i)
+
+// Check if price is in PD Array zone
+bool inBullishPDArray = false
+bool inBearishPDArray = false
+
+if array.size(activeBullFVGTops) > 0
+    for i = 0 to array.size(activeBullFVGTops) - 1
+        top = array.get(activeBullFVGTops, i)
+        bot = array.get(activeBullFVGBots, i)
+        if low <= top and low >= bot
+            inBullishPDArray := true
+            break
+
+if array.size(activeBearFVGTops) > 0
+    for i = 0 to array.size(activeBearFVGTops) - 1
+        top = array.get(activeBearFVGTops, i)
+        bot = array.get(activeBearFVGBots, i)
+        if high >= bot and high <= top
+            inBearishPDArray := true
+            break
+
+// Order Block Detection (last bearish candle before bullish move, vice versa)
+var float bullishOBTop = na
+var float bullishOBBot = na
+var float bearishOBTop = na
+var float bearishOBBot = na
+
+// Detect bullish order block (last down candle before strong up move)
+if close > open and close[1] < open[1]
+    bullishOBTop := high[1]
+    bullishOBBot := low[1]
+
+// Detect bearish order block (last up candle before strong down move)
+if close < open and close[1] > open[1]
+    bearishOBTop := high[1]
+    bearishOBBot := low[1]
+
+// Check if in order block zone
+bool inBullishOB = not na(bullishOBTop) and (low <= bullishOBTop and low >= bullishOBBot)
+bool inBearishOB = not na(bearishOBTop) and (high >= bearishOBBot and high <= bearishOBTop)
+
+// Combined PD Array condition
+bool inPDArray = inBullishPDArray or inBearishPDArray or inBullishOB or inBearishOB
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// WICK REJECTION PATTERN
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+atr = ta.atr(14)
+float body = math.abs(close - open)
+float upperWick = high - math.max(open, close)
+float lowerWick = math.min(open, close) - low
+float candleRange = high - low
+
+// Wick must be multiple of body AND meet minimum ATR size
+bool longUpperWick = (upperWick >= wickMultiple * body) and (upperWick >= minWickSize * atr)
+bool longLowerWick = (lowerWick >= wickMultiple * body) and (lowerWick >= minWickSize * atr)
+
+// Also check that body is relatively small (< 40% of candle range)
+bool smallBody = body < (0.4 * candleRange)
+
+bool wickRejectionBullish = longLowerWick and smallBody
+bool wickRejectionBearish = longUpperWick and smallBody
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CVD (CUMULATIVE VOLUME DELTA) APPROXIMATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Approximate CVD using close vs open direction
+// Positive if close > open (buying pressure), negative if close < open (selling pressure)
+float volumeDelta = close > open ? volume : close < open ? -volume : 0
+var float cvd = 0.0
+cvd += volumeDelta
+
+// Store CVD values for divergence detection
+var array<float> cvdHistory = array.new<float>(cvdSensitivity)
+var array<float> priceHistory = array.new<float>(cvdSensitivity)
+
+array.push(cvdHistory, cvd)
+array.push(priceHistory, close)
+
+if array.size(cvdHistory) > cvdSensitivity
+    array.shift(cvdHistory)
+    array.shift(priceHistory)
+
+// Detect divergence: price makes new high/low but CVD doesn't confirm
+bool bearishExhaustion = false
+bool bullishExhaustion = false
+
+if array.size(cvdHistory) >= minDivergenceBars
+    // Check for bearish exhaustion (new high without CVD confirmation)
+    recentHigh = ta.highest(high, cvdSensitivity)
+    if high >= recentHigh
+        maxCVD = array.max(cvdHistory)
+        currentCVDIndex = array.size(cvdHistory) - 1
+        if array.get(cvdHistory, currentCVDIndex) < maxCVD
+            bearishExhaustion := true
+
+    // Check for bullish exhaustion (new low without CVD confirmation)
+    recentLow = ta.lowest(low, cvdSensitivity)
+    if low <= recentLow
+        minCVD = array.min(cvdHistory)
+        currentCVDIndex = array.size(cvdHistory) - 1
+        if array.get(cvdHistory, currentCVDIndex) > minCVD
+            bullishExhaustion := true
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INSIDE BAR (A+ SETUP)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bool isInsideBar = (high <= high[1] and low >= low[1])
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ABSORPTION (VOLUME IN WICK)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Check if volume is above average in a rejection candle (indicates absorption)
+avgVolume = ta.sma(volume, 20)
+bool highVolume = volume > (1.5 * avgVolume)
+
+// Bullish absorption: long lower wick with high volume (buyers absorbed selling)
+bool bullishAbsorption = wickRejectionBullish and highVolume
+
+// Bearish absorption: long upper wick with high volume (sellers absorbed buying)
+bool bearishAbsorption = wickRejectionBearish and highVolume
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// THREE TICKS RULE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Check if there was at least X ticks of retracement from recent swing
+// For GC, 1 tick = $0.10, so we check price movement in points
+tickSize = syminfo.mintick
+requiredRetracement = minTickRetracement * tickSize
+
+// Bullish: check retracement from recent low
+recentLow = ta.lowest(low, 10)
+bullishRetracement = (close - recentLow) >= requiredRetracement
+
+// Bearish: check retracement from recent high
+recentHigh = ta.highest(high, 10)
+bearishRetracement = (recentHigh - close) >= requiredRetracement
+
+bool passesThreeTicksBull = threeTicksEnabled ? bullishRetracement : true
+bool passesThreeTicksBear = threeTicksEnabled ? bearishRetracement : true
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SIGNAL GENERATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Buy Signal: All bullish conditions align
+bool buySignal = inTradingHours and
+                 (inBullishPDArray or inBullishOB) and
+                 wickRejectionBullish and
+                 bullishExhaustion and
+                 isInsideBar and
+                 bullishAbsorption and
+                 passesThreeTicksBull
+
+// Sell Signal: All bearish conditions align
+bool sellSignal = inTradingHours and
+                  (inBearishPDArray or inBearishOB) and
+                  wickRejectionBearish and
+                  bearishExhaustion and
+                  isInsideBar and
+                  bearishAbsorption and
+                  passesThreeTicksBear
+
+// Signal filtering (max 1 per session to avoid overtrading)
+var int lastSignalBar = 0
+var bool signalTakenToday = false
+
+newDay = ta.change(time("D"))
+if newDay
+    signalTakenToday := false
+
+if (buySignal or sellSignal) and not signalTakenToday
+    signalTakenToday := true
+    lastSignalBar := bar_index
+else if signalTakenToday
+    buySignal := false
+    sellSignal := false
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL PLOTTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Plot PD Array zones
+var array<box> bullFVGBoxes = array.new<box>()
+var array<box> bearFVGBoxes = array.new<box>()
+
+if showPDZones
+    // Draw bullish FVG zones
+    if array.size(activeBullFVGTops) > 0
+        for i = 0 to array.size(activeBullFVGTops) - 1
+            top = array.get(activeBullFVGTops, i)
+            bot = array.get(activeBullFVGBots, i)
+            barIdx = array.get(activeBullFVGBars, i)
+
+            if i < array.size(bullFVGBoxes)
+                b = array.get(bullFVGBoxes, i)
+                if not na(b)
+                    box.set_right(b, bar_index)
+            else
+                newBox = box.new(barIdx, top, bar_index, bot, border_color=color.new(color.green, 60), bgcolor=color.new(color.green, 90), border_width=1)
+                array.push(bullFVGBoxes, newBox)
+
+    // Draw bearish FVG zones
+    if array.size(activeBearFVGTops) > 0
+        for i = 0 to array.size(activeBearFVGTops) - 1
+            top = array.get(activeBearFVGTops, i)
+            bot = array.get(activeBearFVGBots, i)
+            barIdx = array.get(activeBearFVGBars, i)
+
+            if i < array.size(bearFVGBoxes)
+                b = array.get(bearFVGBoxes, i)
+                if not na(b)
+                    box.set_right(b, bar_index)
+            else
+                newBox = box.new(barIdx, top, bar_index, bot, border_color=color.new(color.red, 60), bgcolor=color.new(color.red, 90), border_width=1)
+                array.push(bearFVGBoxes, newBox)
+
+// Highlight trading session
+bgcolor(inTradingHours ? color.new(color.blue, 95) : na, title="NY Session")
+
+// Mark inside bars
+plotchar(showInsideBars and isInsideBar, "Inside Bar", "•", location.abovebar, color.new(color.orange, 30), size=size.tiny)
+
+// Plot signals
+plotshape(showSignals and buySignal, title="Buy Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, size=size.normal)
+plotshape(showSignals and sellSignal, title="Sell Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+
+// Debug info
+if debugMode
+    var label debugLabel = na
+    if bar_index % 10 == 0
+        if not na(debugLabel)
+            label.delete(debugLabel)
+
+        debugText = "Session: " + str.tostring(inTradingHours) + "\n" +
+                    "PD Array: " + str.tostring(inPDArray) + "\n" +
+                    "Wick Rej: " + str.tostring(wickRejectionBullish or wickRejectionBearish) + "\n" +
+                    "Exhaustion: " + str.tostring(bullishExhaustion or bearishExhaustion) + "\n" +
+                    "Inside Bar: " + str.tostring(isInsideBar) + "\n" +
+                    "CVD: " + str.tostring(cvd, "#.##")
+
+        debugLabel := label.new(bar_index, high, debugText, style=label.style_label_down, color=color.new(color.gray, 80), textcolor=color.white, size=size.small)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="GC Buy Alert", message="GC Model BUY Signal - All conditions met (PD Array + Wick + CVD + Inside Bar + Absorption + 3 Ticks)")
+alertcondition(sellSignal, title="GC Sell Alert", message="GC Model SELL Signal - All conditions met (PD Array + Wick + CVD + Inside Bar + Absorption + 3 Ticks)")

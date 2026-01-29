@@ -1,0 +1,325 @@
+//@version=5
+indicator("GC OTE Reversal Signals", overlay=true, max_lines_count=10, max_labels_count=50, max_boxes_count=10)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GC OTE REVERSAL SIGNALS - 1M CHART ONLY
+// Goal: 1-2 high-quality reversal signals per day
+// Risk: 2.2 pt stop, 10 pt target
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// A) TIMEFRAME + SYMBOL INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+useAsiaFilter = input.bool(true, "Disable Signals During Asia Session", group="Session Filter")
+asiaStartHour = input.int(0, "Asia Start Hour", minval=0, maxval=23, group="Session Filter")
+asiaEndHour = input.int(6, "Asia End Hour", minval=0, maxval=23, group="Session Filter")
+timezone = input.string("America/New_York", "Timezone", group="Session Filter")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// B) HIGHER TIMEFRAME INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+htfLegTF = input.string("15", "HTF Leg Timeframe", group="HTF Settings")
+pivotLenHTF = input.int(3, "HTF Pivot Length", minval=2, maxval=10, group="HTF Settings")
+minLegSize = input.float(6.0, "Min HTF Leg Size (pts)", step=0.1, group="HTF Settings")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C) OTE + ENTRY LOGIC INPUTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+oteTol = input.float(0.6, "OTE Tolerance (pts)", step=0.1, group="OTE & Entry")
+wickRatio = input.float(0.45, "Min Wick % of Candle", step=0.05, group="OTE & Entry", tooltip="0.45 = 45%")
+closeBackInPrevRange = input.bool(true, "Close Inside Previous Range", group="OTE & Entry")
+rangeBars = input.int(2, "Close-in-Range Bars", minval=1, maxval=3, group="OTE & Entry")
+
+sweepLookback = input.int(60, "Sweep Lookback (1m bars)", minval=20, maxval=300, group="Sweep & IFVG")
+invWindow = input.int(30, "IFVG Valid Window (bars)", minval=5, maxval=200, group="Sweep & IFVG")
+
+microConfirm = input.bool(true, "Micro Confirm (break prev high/low)", group="Confirmation")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// D) SIGNAL THROTTLING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+maxSignalsPerDay = input.int(2, "Max Signals Per Day", minval=1, maxval=10, group="Signal Control")
+cooldownBars = input.int(30, "Cooldown Between Signals (bars)", minval=5, maxval=200, group="Signal Control")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// E) DISPLAY
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+showLabels = input.bool(false, "Show BUY/SELL Labels", group="Display")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TIMEFRAME CHECK
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+is1MinChart = timeframe.period == "1"
+var label tfWarning = na
+
+if not is1MinChart and barstate.islast
+    if not na(tfWarning)
+        label.delete(tfWarning)
+    tfWarning := label.new(bar_index, high, "⚠ Use 1m timeframe", style=label.style_label_down, color=color.new(color.orange, 0), textcolor=color.white, size=size.normal)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION FILTER (ASIA)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+currentHour = hour(time, timezone)
+inAsiaSession = (currentHour >= asiaStartHour and currentHour < asiaEndHour)
+sessionOK = not useAsiaFilter or not inAsiaSession
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DAILY RESET FOR SIGNAL COUNTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var int dayKey = na
+var int todaySignalCount = 0
+var int lastSignalBar = na
+
+currentDayKey = time("D", timezone)
+if ta.change(currentDayKey)
+    dayKey := currentDayKey
+    todaySignalCount := 0
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C1) HTF SWING POINTS (15M PIVOTS)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Request HTF data with proper non-repainting
+[htf_high, htf_low, htf_time] = request.security(syminfo.tickerid, htfLegTF, [high, low, time], lookahead=barmerge.lookahead_off)
+
+// Detect pivots on HTF (using historical offset for confirmation)
+htf_ph = ta.pivothigh(htf_high, pivotLenHTF, pivotLenHTF)
+htf_pl = ta.pivotlow(htf_low, pivotLenHTF, pivotLenHTF)
+
+// Track last confirmed swing high and low
+var float lastSwingHigh15 = na
+var int lastSwingHighTime15 = na
+var float lastSwingLow15 = na
+var int lastSwingLowTime15 = na
+
+// Update when new pivots form (non-repainting confirmed pivots)
+if not na(htf_ph)
+    lastSwingHigh15 := htf_ph
+    lastSwingHighTime15 := htf_time[pivotLenHTF]
+
+if not na(htf_pl)
+    lastSwingLow15 := htf_pl
+    lastSwingLowTime15 := htf_time[pivotLenHTF]
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C2) DETERMINE LEG DIRECTION & C3) OTE ZONE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bool legIsBullish = false
+bool legIsBearish = false
+float legHigh = na
+float legLow = na
+float legRange = 0.0
+bool legOK = false
+
+if not na(lastSwingHigh15) and not na(lastSwingLow15) and not na(lastSwingHighTime15) and not na(lastSwingLowTime15)
+    // Determine which swing is more recent
+    if lastSwingHighTime15 > lastSwingLowTime15
+        // Bullish leg: low → high
+        legIsBullish := true
+        legLow := lastSwingLow15
+        legHigh := lastSwingHigh15
+    else
+        // Bearish leg: high → low
+        legIsBearish := true
+        legHigh := lastSwingHigh15
+        legLow := lastSwingLow15
+
+    legRange := math.abs(legHigh - legLow)
+    legOK := legRange >= minLegSize
+
+// Calculate OTE levels
+float fib618 = na
+float fib705 = na
+float fib79 = na
+float oteTop = na
+float oteBot = na
+
+if legOK
+    if legIsBullish
+        // For bullish leg, OTE is discount zone (below midpoint)
+        fib618 := legHigh - 0.618 * legRange
+        fib705 := legHigh - 0.705 * legRange
+        fib79 := legHigh - 0.79 * legRange
+        oteTop := fib618  // Higher price boundary
+        oteBot := fib79   // Lower price boundary
+    else if legIsBearish
+        // For bearish leg, OTE is premium zone (above midpoint)
+        fib618 := legLow + 0.618 * legRange
+        fib705 := legLow + 0.705 * legRange
+        fib79 := legLow + 0.79 * legRange
+        oteBot := fib618  // Lower price boundary
+        oteTop := fib79   // Higher price boundary
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C4) PRICE IN OTE (WITH TOLERANCE)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bool inOTE_long = false
+bool inOTE_short = false
+
+if legOK and not na(oteTop) and not na(oteBot)
+    // Check if price overlaps OTE zone with tolerance
+    if legIsBullish
+        inOTE_long := (low <= oteTop + oteTol) and (high >= oteBot - oteTol)
+    else if legIsBearish
+        inOTE_short := (low <= oteTop + oteTol) and (high >= oteBot - oteTol)
+
+// Context OK
+bool longContextOK = legIsBullish and legOK and inOTE_long
+bool shortContextOK = legIsBearish and legOK and inOTE_short
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C5) WICK REJECTION (1M)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+rng = high - low
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+
+// Guard against division by zero
+float lowerWickPct = rng > 0 ? lowerWick / rng : 0.0
+float upperWickPct = rng > 0 ? upperWick / rng : 0.0
+
+// Close in range check
+float rangeHigh = ta.highest(high, rangeBars)[1]
+float rangeLow = ta.lowest(low, rangeBars)[1]
+bool closeInRange = (close >= rangeLow) and (close <= rangeHigh)
+
+// Apply close-in-range filter if enabled
+bool closeRangeOK = not closeBackInPrevRange or closeInRange
+
+// Wick rejection conditions
+bool wickRejectionLong = (lowerWickPct >= wickRatio) and closeRangeOK
+bool wickRejectionShort = (upperWickPct >= wickRatio) and closeRangeOK
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C6) LIQUIDITY SWEEP (1M)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+priorLow = ta.lowest(low, sweepLookback)[1]
+priorHigh = ta.highest(high, sweepLookback)[1]
+
+bool sweptDown = low < priorLow
+bool sweptUp = high > priorHigh
+
+// Reclaim conditions (looser)
+bool reclaimLong = sweptDown and (close > priorLow or close > open)
+bool reclaimShort = sweptUp and (close < priorHigh or close < open)
+
+bool liquiditySweepLong = reclaimLong
+bool liquiditySweepShort = reclaimShort
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// C7) IFVG CONFIRMATION (INVERSE FVG)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Detect FVGs (3-candle pattern)
+bool bullFVG = low > high[2]
+bool bearFVG = high < low[2]
+
+// Store most recent FVG boundaries and bar index
+var float lastBearFVG_top = na
+var float lastBearFVG_bot = na
+var int bearFVGBarIndex = na
+
+var float lastBullFVG_top = na
+var float lastBullFVG_bot = na
+var int bullFVGBarIndex = na
+
+// Update when new FVG forms
+if bearFVG
+    lastBearFVG_top := low[2]
+    lastBearFVG_bot := high
+    bearFVGBarIndex := bar_index
+
+if bullFVG
+    lastBullFVG_top := low
+    lastBullFVG_bot := high[2]
+    bullFVGBarIndex := bar_index
+
+// Check for inversion within window
+bool haveStoredBearFVG = not na(lastBearFVG_top) and not na(bearFVGBarIndex)
+bool haveStoredBullFVG = not na(lastBullFVG_top) and not na(bullFVGBarIndex)
+
+bool ifvgLongOK = haveStoredBearFVG and (bar_index - bearFVGBarIndex <= invWindow) and (close > lastBearFVG_top)
+bool ifvgShortOK = haveStoredBullFVG and (bar_index - bullFVGBarIndex <= invWindow) and (close < lastBullFVG_bot)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// D) MICRO CONFIRMATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bool microOK_long = not microConfirm or close > high[1]
+bool microOK_short = not microConfirm or close < low[1]
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SIGNAL THROTTLING CHECK
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bool dailyLimitOK = todaySignalCount < maxSignalsPerDay
+bool cooldownOK = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
+bool throttleOK = dailyLimitOK and cooldownOK
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FINAL SIGNAL LOGIC
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+bool buySignal = is1MinChart and sessionOK and longContextOK and liquiditySweepLong and wickRejectionLong and ifvgLongOK and microOK_long and throttleOK
+
+bool sellSignal = is1MinChart and sessionOK and shortContextOK and liquiditySweepShort and wickRejectionShort and ifvgShortOK and microOK_short and throttleOK
+
+// Update signal tracking
+if buySignal or sellSignal
+    todaySignalCount += 1
+    lastSignalBar := bar_index
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RISK CALCULATIONS (FOR REFERENCE / ALERTS)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+
+if buySignal
+    entryPrice := close
+    stopLoss := close - 2.2
+    takeProfit := close + 10.0
+
+if sellSignal
+    entryPrice := close
+    stopLoss := close + 2.2
+    takeProfit := close - 10.0
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// E) OUTPUT - SIGNALS ONLY
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Plot arrows
+plotshape(buySignal, title="BUY Signal", text="BUY", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, size=size.normal)
+
+plotshape(sellSignal, title="SELL Signal", text="SELL", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+
+// Optional labels (default OFF to reduce clutter)
+if showLabels and buySignal
+    label.new(bar_index, low, "BUY\nEntry: " + str.tostring(close, "#.##") + "\nSL: " + str.tostring(stopLoss, "#.##") + "\nTP: " + str.tostring(takeProfit, "#.##"), style=label.style_label_up, color=color.new(color.green, 20), textcolor=color.white, size=size.small)
+
+if showLabels and sellSignal
+    label.new(bar_index, high, "SELL\nEntry: " + str.tostring(close, "#.##") + "\nSL: " + str.tostring(stopLoss, "#.##") + "\nTP: " + str.tostring(takeProfit, "#.##"), style=label.style_label_down, color=color.new(color.red, 20), textcolor=color.white, size=size.small)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alertcondition(buySignal, title="GC BUY Signal", message="GC OTE Reversal BUY - Entry: {{close}}, SL: {{close - 2.2}}, TP: {{close + 10}}")
+
+alertcondition(sellSignal, title="GC SELL Signal", message="GC OTE Reversal SELL - Entry: {{close}}, SL: {{close + 2.2}}, TP: {{close - 10}}")

@@ -1,0 +1,23 @@
+{
+  "name": "DiveForEggs",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "DiveWorld": {
+        "$path": "src/ReplicatedStorage/DiveWorld"
+      }
+    },
+    "ServerScriptService": {
+      "DiveWorldBuild": {
+        "$path": "src/ServerScriptService/DiveWorldBuild"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "DiveWorldClient": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/DiveWorldClient"
+        }
+      }
+    }
+  }
+}

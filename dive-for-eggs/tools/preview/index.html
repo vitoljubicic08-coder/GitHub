@@ -1,0 +1,279 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Dive for Eggs preview</title>
+<style>
+  html, body { margin: 0; background: #0b3a5c; overflow: hidden; font-family: "Trebuchet MS", Verdana, sans-serif; }
+  canvas { display: block; }
+  #caption { position: absolute; left: 14px; top: 12px; padding: 8px 12px; border-radius: 8px;
+    background: rgba(8, 30, 56, 0.72); color: #eaf6ff; max-width: 70%; }
+  #caption b { display: block; font-size: 20px; margin-bottom: 2px; }
+  #caption span { font-size: 14px; opacity: 0.9; }
+  #footer { position: absolute; right: 12px; bottom: 10px; font-size: 12px; color: rgba(234, 246, 255, 0.85);
+    background: rgba(8, 30, 56, 0.55); padding: 4px 8px; border-radius: 6px; }
+  .label { position: absolute; transform: translate(-50%, -50%); font-weight: bold; color: #fff;
+    text-shadow: 0 0 4px #0b2a4a, 0 0 8px #0b2a4a; pointer-events: none; }
+  .plot { font-size: 44px; }
+  .gate { font-size: 16px; background: rgba(8, 30, 56, 0.7); padding: 2px 6px; border-radius: 5px; }
+</style>
+</head>
+<body>
+<div id="caption"><b></b><span></span></div>
+<div id="footer">Offline preview of the generated geometry (three.js) &middot; not a Roblox Studio capture</div>
+<script type="module">
+import * as THREE from "./node_modules/three/build/three.module.js";
+
+const params = new URLSearchParams(location.search);
+const scene = await (await fetch("./scene.json")).json();
+const view = scene.views.find((v) => v.id === params.get("view")) ?? scene.views[0];
+const width = view.width ?? 1600;
+const height = view.height ?? 900;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(width, height);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// Same depth keyframes the game's DepthLighting script blends.
+function sampleDepth(depth) {
+  const frames = scene.depthLighting.slice().sort((a, b) => a.depth - b.depth);
+  const lerpColor = (a, b, t) => new THREE.Color("#" + a).lerp(new THREE.Color("#" + b), t);
+  if (depth <= frames[0].depth) depth = frames[0].depth;
+  for (let i = 1; i < frames.length; i++) {
+    const a = frames[i - 1], b = frames[i];
+    if (depth <= b.depth || i === frames.length - 1) {
+      const t = Math.min(1, (depth - a.depth) / (b.depth - a.depth));
+      const out = {};
+      for (const key of Object.keys(a)) {
+        out[key] = typeof a[key] === "number" ? a[key] + (b[key] - a[key]) * t : lerpColor(a[key], b[key], t);
+      }
+      return out;
+    }
+  }
+}
+
+const camPos = new THREE.Vector3(...view.position);
+const depth = Math.max(0, scene.floorY - camPos.y);
+const look = sampleDepth(depth);
+
+const world = new THREE.Scene();
+const fogColor = look.atmosphereColor.clone().lerp(look.atmosphereDecay, 0.35);
+const fogScale = view.fogScale ?? 1;
+if (fogScale > 0) world.fog = new THREE.FogExp2(fogColor, look.atmosphereDensity * 0.0042 * fogScale);
+
+// Underwater backdrop: bright toward the surface, deep blue below.
+{
+  const geo = new THREE.SphereGeometry(6000, 32, 16);
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: {
+      top: { value: look.atmosphereColor.clone().lerp(new THREE.Color("#dff6ff"), 0.45) },
+      mid: { value: fogColor },
+      bottom: { value: look.atmosphereDecay.clone().multiplyScalar(0.55) },
+    },
+    vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bottom; varying vec3 vDir;
+      void main(){ float y = vDir.y; vec3 c = y > 0.0 ? mix(mid, top, smoothstep(0.0, 0.9, y)) : mix(mid, bottom, smoothstep(0.0, 0.7, -y));
+      gl_FragColor = vec4(c, 1.0);
+      #include <colorspace_fragment>
+      }`,
+  });
+  const sky = new THREE.Mesh(geo, mat);
+  sky.renderOrder = -10;
+  world.add(sky);
+}
+
+world.add(new THREE.HemisphereLight(look.outdoorAmbient, look.ambient.clone().multiplyScalar(0.55), 1.35));
+world.add(new THREE.AmbientLight(look.ambient, 0.35));
+const sun = new THREE.DirectionalLight(new THREE.Color("#fff6e6"), 0.55 * look.brightness);
+sun.position.set(120, 600, 180);
+sun.target.position.set(0, 0, 0);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.left = -260; sun.shadow.camera.right = 260;
+sun.shadow.camera.top = 260; sun.shadow.camera.bottom = -260;
+sun.shadow.camera.near = 10; sun.shadow.camera.far = 1600;
+sun.shadow.bias = -0.0008;
+sun.shadow.radius = 3;
+world.add(sun, sun.target);
+
+// Studded plastic: stud pattern in each part's own stud grid, faded when studs get tiny.
+function studMaterial(base) {
+  const mat = base;
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", `#include <common>
+        attribute float aStuds; varying float vStuds; varying vec3 vStudPos; varying vec3 vStudNormal;`)
+      .replace("#include <begin_vertex>", `#include <begin_vertex>
+        vec3 sc = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
+        vStudPos = position * sc + sc * 0.5; vStudNormal = normal; vStuds = aStuds;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", `#include <common>
+        varying float vStuds; varying vec3 vStudPos; varying vec3 vStudNormal;`)
+      .replace("#include <color_fragment>", `#include <color_fragment>
+        {
+          vec3 n = vStudNormal; vec2 uv; bool isTop = n.y > 0.5;
+          if (abs(n.y) > 0.5) uv = vStudPos.xz; else if (abs(n.x) > 0.5) uv = vStudPos.zy; else uv = vStudPos.xy;
+          bool show = vStuds > 1.5 || (vStuds > 0.5 && isTop);
+          if (show && n.y > -0.5) {
+            vec2 cell = fract(uv) - 0.5; float r = length(cell);
+            float fw = fwidth(uv.x) + fwidth(uv.y);
+            float strength = 1.0 - smoothstep(0.08, 0.35, fw);
+            float disc = 1.0 - smoothstep(0.26, 0.30, r);
+            float rim = smoothstep(0.24, 0.30, r) * (1.0 - smoothstep(0.30, 0.36, r));
+            float lit = clamp(dot(normalize(cell + 1e-4), vec2(-0.7, -0.7)), -1.0, 1.0);
+            diffuseColor.rgb *= 1.0 + strength * (disc * 0.07 - rim * (0.10 + 0.06 * lit));
+          }
+          diffuseColor.rgb *= isTop ? 1.0 : (abs(n.y) > 0.5 ? 0.6 : 0.86);
+        }`);
+  };
+  return mat;
+}
+
+const unitBox = new THREE.BoxGeometry(1, 1, 1);
+const groups = { solid: [], neon: [], shell: [], water: [] };
+for (const p of scene.parts) {
+  const kind = p[17];
+  (kind === 0 ? groups.solid : kind === 1 ? groups.neon : kind === 2 ? groups.shell : groups.water).push(p);
+}
+
+function matrixOf(p) {
+  const m = new THREE.Matrix4();
+  m.set(p[3] * p[12], p[4] * p[13], p[5] * p[14], p[0],
+        p[6] * p[12], p[7] * p[13], p[8] * p[14], p[1],
+        p[9] * p[12], p[10] * p[13], p[11] * p[14], p[2],
+        0, 0, 0, 1);
+  return m;
+}
+
+function instanced(list, material, withStuds) {
+  const mesh = new THREE.InstancedMesh(unitBox.clone(), material, list.length);
+  const studs = new Float32Array(list.length);
+  list.forEach((p, i) => {
+    mesh.setMatrixAt(i, matrixOf(p));
+    mesh.setColorAt(i, new THREE.Color("#" + p[15]));
+    studs[i] = p[18];
+  });
+  if (withStuds) mesh.geometry.setAttribute("aStuds", new THREE.InstancedBufferAttribute(studs, 1));
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.instanceColor.needsUpdate = true;
+  return mesh;
+}
+
+const solid = instanced(groups.solid, studMaterial(new THREE.MeshLambertMaterial()), true);
+solid.castShadow = true; solid.receiveShadow = true;
+world.add(solid);
+world.add(instanced(groups.neon, new THREE.MeshBasicMaterial({ color: new THREE.Color(1.25, 1.1, 0.9) }), false));
+
+for (const p of groups.water) {
+  const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color("#" + p[15]), transparent: true,
+    opacity: 1 - p[16], depthWrite: false, emissive: new THREE.Color("#" + p[15]).multiplyScalar(0.25) });
+  const mesh = new THREE.Mesh(unitBox, mat);
+  mesh.matrixAutoUpdate = false;
+  mesh.matrix.copy(matrixOf(p));
+  mesh.renderOrder = 2;
+  world.add(mesh);
+}
+
+// The bubble: fresnel-only, invisible from inside (back faces culled, as in Roblox).
+for (const p of groups.shell) {
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.FrontSide,
+    uniforms: { tint: { value: new THREE.Color("#" + p[15]) } },
+    vertexShader: `varying vec3 vN; varying vec3 vV;
+      void main(){ vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal);
+      vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }`,
+    fragmentShader: `uniform vec3 tint; varying vec3 vN; varying vec3 vV;
+      void main(){ float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 3.0);
+      float spec = pow(max(dot(reflect(-normalize(vV), normalize(vN)), normalize(vec3(0.2,1.0,0.3))), 0.0), 40.0);
+      gl_FragColor = vec4(mix(tint, vec3(1.0), 0.4), 0.03 + 0.55 * f + 0.2 * spec);
+      #include <colorspace_fragment>
+      }`,
+  });
+  const geo = new THREE.SphereGeometry(0.5, 96, 64);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.matrixAutoUpdate = false;
+  mesh.matrix.copy(matrixOf(p));
+  mesh.renderOrder = 3;
+  world.add(mesh);
+}
+
+// Warm lantern glow: a few real lights near the camera, sprites for the rest.
+const sortedLights = scene.lights.slice().sort((a, b) =>
+  camPos.distanceTo(new THREE.Vector3(a[0], a[1], a[2])) - camPos.distanceTo(new THREE.Vector3(b[0], b[1], b[2])));
+sortedLights.slice(0, 8).forEach((l) => {
+  const light = new THREE.PointLight(new THREE.Color("#" + l[3]), 2.2, l[4] * 1.6, 1.2);
+  light.position.set(l[0], l[1], l[2]);
+  world.add(light);
+});
+{
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,210,140,0.9)"); g.addColorStop(1, "rgba(255,180,100,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(canvas);
+  for (const l of scene.lights) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    sprite.position.set(l[0], l[1], l[2]);
+    sprite.scale.setScalar(7);
+    world.add(sprite);
+  }
+}
+
+// Blocky avatar for scale (about 5 studs tall), preview only.
+function avatar(pos, yaw) {
+  const group = new THREE.Group();
+  const add = (w, h, d, x, y, z, color) => {
+    const mesh = new THREE.Mesh(unitBox, new THREE.MeshLambertMaterial({ color }));
+    mesh.scale.set(w, h, d); mesh.position.set(x, y, z); mesh.castShadow = true;
+    group.add(mesh);
+  };
+  add(0.95, 2, 0.95, -0.5, 1, 0, "#2b3240"); add(0.95, 2, 0.95, 0.5, 1, 0, "#2b3240");
+  add(2, 2, 1, 0, 3, 0, "#1d2330"); add(0.9, 2, 0.9, -1.45, 3, 0, "#e8b893"); add(0.9, 2, 0.9, 1.45, 3, 0, "#e8b893");
+  add(1.2, 1.2, 1.2, 0, 4.6, 0, "#e8b893"); add(1.35, 0.55, 1.35, 0, 5.3, 0.05, "#8a4a22");
+  add(1.1, 1.8, 0.7, 0, 3.1, 0.85, "#6fd3f2");
+  group.position.set(pos[0], pos[1], pos[2]);
+  group.rotation.y = yaw;
+  world.add(group);
+}
+for (const a of view.avatars ?? []) avatar(a.position, a.yaw);
+
+let camera;
+if (view.ortho) {
+  const h = view.halfSize, aspect = width / height;
+  camera = new THREE.OrthographicCamera(-h * aspect, h * aspect, h, -h, 1, 3000);
+} else {
+  camera = new THREE.PerspectiveCamera(view.fov ?? 60, width / height, 0.5, 8000);
+}
+camera.position.copy(camPos);
+if (view.up) camera.up.set(...view.up);
+camera.lookAt(new THREE.Vector3(...view.target));
+camera.updateMatrixWorld();
+
+document.querySelector("#caption b").textContent = view.title;
+document.querySelector("#caption span").textContent = view.caption;
+if (view.labels) {
+  const place = (pos, text, cls) => {
+    const v = new THREE.Vector3(...pos).project(camera);
+    const el = document.createElement("div");
+    el.className = "label " + cls;
+    el.textContent = text;
+    el.style.left = ((v.x + 1) / 2) * width + "px";
+    el.style.top = ((1 - v.y) / 2) * height + "px";
+    document.body.appendChild(el);
+  };
+  for (const p of scene.plots) place(p.position, String(p.id), "plot");
+  for (const g of scene.gates) place(g.position, g.name + " gate", "gate");
+}
+
+renderer.render(world, camera);
+window.__rendered = true;
+</script>
+</body>
+</html>

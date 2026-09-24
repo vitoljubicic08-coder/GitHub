@@ -1,0 +1,13 @@
+{
+  "name": "dive-for-eggs-preview",
+  "private": true,
+  "description": "Offline three.js preview of the generated starter world (review screenshots).",
+  "type": "module",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1",
+    "three": "0.169.0"
+  }
+}

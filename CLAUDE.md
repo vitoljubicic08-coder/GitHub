@@ -48,8 +48,16 @@ Example structure:
 ```
 GitHub/
 ├── .git/              # Git version control metadata
+├── *.pine             # TradingView Pine Script v5 indicators/strategies
+├── dive-for-eggs/     # Roblox (Luau) starter world; see dive-for-eggs/README.md
+│   ├── src/           # Rojo tree: Config, world builders, client effects
+│   ├── studio/        # Generated one-paste Studio installer
+│   ├── tools/         # Lune mock checks, installer bundler, three.js preview
+│   └── screenshots/   # Offline review renders
 └── CLAUDE.md         # This file
 ```
+
+For `dive-for-eggs/`, run `lune run tools/check-world.luau` before committing, and regenerate the installer with `lune run tools/bundle-studio.luau` whenever `src/` changes.
 
 ### Planned Structure
 *Document the intended directory structure as it develops*

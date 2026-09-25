@@ -41,6 +41,31 @@ function Scene.covers(part, x: number, z: number): boolean
 	return math.abs(lx) <= part.Size.X / 2 + 1e-6 and math.abs(lz) <= part.Size.Z / 2 + 1e-6
 end
 
+-- Horizontal distance from (x, z) to an upright part's rotated footprint (0 if inside).
+function Scene.footprintDistance(part, x: number, z: number): number
+	local c = part.CFrame
+	local dx, dz = x - c.Position.X, z - c.Position.Z
+	local right, back = c.RightVector, c.ZVector
+	local lx = math.abs(dx * right.X + dz * right.Z) - part.Size.X / 2
+	local lz = math.abs(dx * back.X + dz * back.Z) - part.Size.Z / 2
+	return math.sqrt(math.max(lx, 0) ^ 2 + math.max(lz, 0) ^ 2)
+end
+
+-- Farthest horizontal distance from (x, z) to any corner of a part's rotated box.
+function Scene.farthestCorner(part, x: number, z: number): number
+	local c = part.CFrame
+	local far = 0
+	for _, sx in { -1, 1 } do
+		for _, sy in { -1, 1 } do
+			for _, sz in { -1, 1 } do
+				local p = c * Vector3.new(sx * part.Size.X / 2, sy * part.Size.Y / 2, sz * part.Size.Z / 2)
+				far = math.max(far, math.sqrt((p.X - x) ^ 2 + (p.Z - z) ^ 2))
+			end
+		end
+	end
+	return far
+end
+
 -- Height raster of solid seabed parts (highest top per cell). Floating overhang slabs
 -- and cave roofs are left out so the raster describes the ground you would land on.
 function Scene.heightRaster(seabedFolder, cell: number, halfExtent: number)

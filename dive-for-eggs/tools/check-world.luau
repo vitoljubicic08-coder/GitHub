@@ -110,31 +110,230 @@ for _, part in hub.FloorPattern:GetChildren() do
 end
 check(dividers == 6, "six radial sector dividers", dividers .. " dividers")
 
------------------------------------------------------------------------- empty centre and interior
-local plazaBlockers = {}
+------------------------------------------------------------------------ plaza, stalls and interior
+local StallBuilder = Loader.require(roblox.game:GetService("ServerScriptService").DiveWorldBuild.StallBuilder)
+local stallsFolder = hub:FindFirstChild("CentralStalls")
+local statueRadius = StallBuilder.statueRadius(Config)
+
+local function inStalls(part): boolean
+	return stallsFolder ~= nil and part:IsDescendantOf(stallsFolder)
+end
+
+-- The middle of the plaza is reserved for the imported fish statue.
+local statueZoneBlockers = {}
 for _, part in allParts do
 	-- The bubble shell's bounding box spans the plaza, but the shell itself passes
 	-- 150 studs overhead and has no collision.
 	if part.Transparency < 1 and part.Name ~= "AirBubble" then
 		local centre, half = Scene.aabb(part)
 		local nearest = math.max(0, radius(centre) - math.max(half.X, half.Z))
-		if nearest < H.PLAZA_RADIUS + 2 and centre.Y + half.Y > F + 0.25 and centre.Y - half.Y < F + 60 then
-			table.insert(plazaBlockers, part:GetFullName())
+		if nearest < statueRadius and centre.Y + half.Y > F + 0.25 and centre.Y - half.Y < F + 60 then
+			table.insert(statueZoneBlockers, part:GetFullName())
 		end
 	end
 end
-check(#plazaBlockers == 0, "central plaza has no physical objects", #plazaBlockers .. " blockers " .. table.concat(plazaBlockers, "; "))
+check(
+	#statueZoneBlockers == 0,
+	"statue zone in the middle of the plaza is clear",
+	string.format("radius %.1f, %d blockers", statueRadius, #statueZoneBlockers)
+)
 
 local clutter = {}
 for _, part in hubParts do
-	if part.Transparency < 1 then
+	if part.Transparency < 1 and not inStalls(part) then
 		local centre, half = Scene.aabb(part)
 		if radius(centre) + math.max(half.X, half.Z) < 118 and centre.Y + half.Y > F + 1 then
 			table.insert(clutter, part:GetFullName())
 		end
 	end
 end
-check(#clutter == 0, "hub interior: nothing rises more than 1 stud above the floor", #clutter .. " items")
+check(#clutter == 0, "hub interior: only the four stalls rise above the floor", #clutter .. " other items")
+
+local stalls = if stallsFolder then stallsFolder:GetChildren() else {}
+local expectedColours = { Blue = true, Red = true, Yellow = true, Green = true }
+local namesOk = #stalls == 4
+for _, stall in stalls do
+	local colour = stall:GetAttribute("StallColor")
+	if stall.Name ~= "CentralStall_" .. tostring(colour) or not expectedColours[colour] then
+		namesOk = false
+	end
+	expectedColours[colour] = nil
+end
+check(namesOk, "exactly 4 stalls: blue, red, yellow and green", #stalls .. " stalls")
+
+-- Geometry signature relative to each stall's pivot; colour excluded for canopy stripes.
+local function signature(model, withCanopyColour: boolean): string
+	local rows = {}
+	local inverse = model:GetPivot():Inverse()
+	for _, part in Scene.parts(model) do
+		local rel = inverse * part.CFrame
+		local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = rel:GetComponents()
+		local colour = part.Color:ToHex()
+		if part:GetAttribute("CanopyStripe") == "Color" and not withCanopyColour then
+			colour = "canopy"
+		end
+		local values = { x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22, part.Size.X, part.Size.Y, part.Size.Z }
+		for i, v in values do
+			-- Round first so -0.0001 and 0.0001 compare equal.
+			values[i] = string.format("%.3f", math.floor(v * 1000 + 0.5) / 1000 + 0)
+		end
+		table.insert(rows, part.Name .. "|" .. table.concat(values, ",") .. "|" .. colour .. "|" .. part.Material.Name)
+	end
+	table.sort(rows)
+	return table.concat(rows, "\n")
+end
+
+local master = roblox.game:GetService("ServerStorage"):FindFirstChild("DiveWorldTemplates")
+master = master and master:FindFirstChild("CentralStall_Master")
+local masterSignature = master and signature(master, false)
+local identical = master ~= nil and #stalls == 4
+for _, stall in stalls do
+	if signature(stall, false) ~= masterSignature then
+		identical = false
+	end
+end
+check(identical, "all four stalls are exact copies of CentralStall_Master (ServerStorage)")
+
+local P = Config.Palette
+local canopyOk = #stalls == 4
+for _, stall in stalls do
+	local want = P.Canopy[stall:GetAttribute("StallColor")]
+	local coloured, white = 0, 0
+	for _, part in Scene.parts(stall) do
+		local stripe = part:GetAttribute("CanopyStripe")
+		if stripe == "Color" then
+			coloured += 1
+			canopyOk = canopyOk and want ~= nil and part.Color:ToHex() == want:ToHex()
+		elseif stripe == "White" then
+			white += 1
+			canopyOk = canopyOk and part.Color:ToHex() == P.CanopyWhite:ToHex()
+		end
+	end
+	canopyOk = canopyOk and coloured == 4 and white == 3
+end
+check(canopyOk, "canopies are colour/white stripes, the only difference between stalls")
+
+local textFree = true
+for _, stall in stalls do
+	for _, d in stall:GetDescendants() do
+		if d.ClassName == "SurfaceGui" or d.ClassName == "TextLabel" or d.ClassName == "Decal" or d.ClassName == "BillboardGui" then
+			textFree = false
+		end
+	end
+end
+check(textFree, "stalls carry no header, text, logo or products")
+
+local facingOk, angles = #stalls == 4, {}
+for _, stall in stalls do
+	local pivot = stall:GetPivot()
+	local toCentre = Vector3.new(-pivot.Position.X, 0, -pivot.Position.Z).Unit
+	facingOk = facingOk and pivot.LookVector:Dot(toCentre) > 0.999 and math.abs(pivot.Position.Y - F) < 1e-6
+	table.insert(angles, math.floor(angleOf(pivot.Position) + 0.5))
+end
+table.sort(angles)
+check(
+	facingOk and table.concat(angles, ",") == "45,135,225,315",
+	"stall counters all face the statue, evenly spaced 90 degrees apart",
+	table.concat(angles, ", ")
+)
+
+-- Footprints: nothing may overlap another stall, leave the plaza, or reach the floor lines.
+local function footprints(model)
+	local out = {}
+	for _, part in Scene.parts(model) do
+		local centre, half = Scene.aabb(part)
+		table.insert(out, { centre = centre, half = half, part = part })
+	end
+	return out
+end
+local function boxesOverlap(a, b): boolean
+	return math.abs(a.centre.X - b.centre.X) < a.half.X + b.half.X
+		and math.abs(a.centre.Z - b.centre.Z) < a.half.Z + b.half.Z
+		and math.abs(a.centre.Y - b.centre.Y) < a.half.Y + b.half.Y
+end
+local stallBoxes = {}
+for i, stall in stalls do
+	stallBoxes[i] = footprints(stall)
+end
+local overlaps = 0
+for i = 1, #stalls do
+	for j = i + 1, #stalls do
+		for _, a in stallBoxes[i] do
+			for _, b in stallBoxes[j] do
+				if boxesOverlap(a, b) then
+					overlaps += 1
+				end
+			end
+		end
+	end
+end
+check(overlaps == 0, "stalls do not overlap each other")
+
+local ringInner = H.PLAZA_RADIUS - H.PLAZA_RING_WIDTH / 2
+local outside, nearest, farthestGround = 0, math.huge, 0
+for _, boxes in stallBoxes do
+	for _, box in boxes do
+		local r = Scene.farthestCorner(box.part, 0, 0)
+		-- The walking ring is measured at walking height; the canopy overhangs above heads.
+		if box.centre.Y - box.half.Y < F + 6 then
+			nearest = math.min(nearest, Scene.footprintDistance(box.part, 0, 0))
+		end
+		-- Posts, counter and rails stand on the floor; the canopy only overhangs.
+		if box.part:GetAttribute("CanopyStripe") == nil then
+			farthestGround = math.max(farthestGround, r)
+			if r > ringInner then
+				outside += 1
+			end
+		elseif r > H.PLAZA_RADIUS + 1 then
+			outside += 1
+		end
+	end
+end
+check(
+	outside == 0,
+	"stalls stand inside the plaza ring, clear of the radial floor lines",
+	string.format("farthest post/counter corner %.1f of ring %.1f", farthestGround, ringInner)
+)
+check(
+	nearest >= statueRadius + Config.Statue.WALK_RING - 0.01,
+	"walking ring of at least 6 studs between the statue zone and the stall counters",
+	string.format("statue zone %.1f, nearest stall part %.1f", statueRadius, nearest)
+)
+
+local blockedGates = {}
+for _, gateAngle in H.GATE_ANGLES do
+	local a = math.rad(gateAngle)
+	for r = 0, H.WALL_INNER_RADIUS, 1 do
+		for _, lateral in { -2, 0, 2 } do
+			local x = math.sin(a) * r + math.cos(a) * lateral
+			local z = -math.cos(a) * r + math.sin(a) * lateral
+			for _, boxes in stallBoxes do
+				for _, box in boxes do
+					if box.centre.Y - box.half.Y < F + 6 and Scene.covers(box.part, x, z) then
+						blockedGates[gateAngle] = true
+					end
+				end
+			end
+		end
+	end
+end
+check(next(blockedGates) == nil, "straight 4-stud lanes from the statue to all four gates stay open")
+
+local counterTop, roofTop = 0, 0
+if stalls[1] then
+	for _, part in Scene.parts(stalls[1]) do
+		if part.Name == "CounterFront" then
+			counterTop = Scene.top(part) - F
+		elseif part.Name == "CanopyStripe" then
+			roofTop = math.max(roofTop, Scene.top(part) - F)
+		end
+	end
+end
+check(
+	counterTop >= 3 and counterTop <= 4 and roofTop >= 9 and roofTop <= 12,
+	"stall scale fits a 5-stud avatar (counter about chest height, roof about 2 avatars)",
+	string.format("counter top %.2f, roof top %.2f", counterTop, roofTop)
+)
 
 local lanterns, lightCount, innerLanterns = 0, 0, 0
 for _, d in world:GetDescendants() do
@@ -152,13 +351,13 @@ check(innerLanterns == 0, "no freestanding lanterns inside the hub", lanterns ..
 local forbidden = {}
 for _, part in allParts do
 	local name = string.lower(part.Name)
-	for _, word in { "statue", "fountain", "orb", "pedestal", "planter", "monument", "bridge", "ladder", "support", "bench", "crate", "sign" } do
+	for _, word in { "fountain", "orb", "pedestal", "planter", "monument", "bridge", "ladder", "bench", "crate", "sign", "sonar", "logo" } do
 		if string.find(name, word, 1, true) then
 			table.insert(forbidden, part:GetFullName())
 		end
 	end
 end
-check(#forbidden == 0, "no statue/fountain/bridge/ladder/support/bench/sign parts", #forbidden .. " found")
+check(#forbidden == 0, "no fountain/bridge/ladder/bench/sign/sonar/logo parts generated", #forbidden .. " found")
 
 local aquariums = 0
 for _, part in allParts do

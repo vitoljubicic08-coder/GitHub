@@ -26,7 +26,19 @@ local function hex(c): string
 	return c:ToHex()
 end
 
--- Part records: position, rotation (row-major), size, colour, transparency, kind, studs.
+-- Stall a part belongs to (for the isolated turnaround), or "".
+local function stallTag(part): string
+	local node = part.Parent
+	while node do
+		if node.Parent and node.Parent.Name == "CentralStalls" then
+			return node.Name
+		end
+		node = node.Parent
+	end
+	return ""
+end
+
+-- Part records: position, rotation (row-major), size, colour, transparency, kind, studs, tag.
 -- kind: 0 solid, 1 neon glow, 2 ellipsoid shell, 3 water/glass.
 local parts = {}
 for _, part in Scene.parts(world) do
@@ -55,6 +67,7 @@ for _, part in Scene.parts(world) do
 			round(part.Transparency),
 			kind,
 			studs,
+			stallTag(part),
 		})
 	end
 end
@@ -118,6 +131,20 @@ for i, angle in H.GATE_ANGLES do
 	table.insert(gates, { name = H.GATE_NAMES[i], position = polar(angle, 152, 12) })
 end
 
+local stallFrames = {}
+for _, stall in world.Hub.CentralStalls:GetChildren() do
+	local components = { stall:GetPivot():GetComponents() }
+	for i, v in components do
+		components[i] = round(v)
+	end
+	stallFrames[stall.Name] = components
+end
+local StallBuilder = Loader.require(Loader.roblox.game:GetService("ServerScriptService").DiveWorldBuild.StallBuilder)
+local statueZone = {
+	radius = StallBuilder.statueRadius(Config),
+	height = Config.Statue.TARGET_HEIGHT,
+}
+
 local spawn = world.Hub.HubSpawn
 local spawnPos = { spawn.Position.X, H.FLOOR_Y, spawn.Position.Z }
 
@@ -130,7 +157,7 @@ local views = {
 	{
 		id = "01-top-down",
 		title = "1. Perfect top-down",
-		caption = "Six plots (numbered), four gates, empty plaza. Fog off for the layout check.",
+		caption = "Six plots (numbered), four gates, four stalls around the statue zone. Fog off for the layout check.",
 		ortho = true,
 		halfSize = 158,
 		position = { 0, 700, 0 },
@@ -152,7 +179,7 @@ local views = {
 	{
 		id = "03-spawn-view",
 		title = "3. Player spawn view",
-		caption = "Spawn on the south avenue, facing the open plaza and the north gate.",
+		caption = "Spawn on the south avenue, facing the central market and the north gate.",
 		position = { spawnPos[1], 8.5, spawnPos[3] + 14 },
 		target = { 0, 3.5, 30 },
 		fov = 70,
@@ -222,6 +249,24 @@ local views = {
 		}
 	end)(),
 	{
+		id = "10-stall-turnaround",
+		title = "Central stall: base model turnaround",
+		caption = "Generic master stall (blue shown). Same geometry for all four; only the canopy colour changes.",
+		turnaround = "CentralStall_Blue",
+		width = 1600,
+		height = 1000,
+	},
+	{
+		id = "11-central-market",
+		title = "Central market",
+		caption = "Four stalls face the statue (ghost = space reserved for the imported FBX, up to 26 studs tall).",
+		position = polar(180, 58, 26),
+		target = { 0, 7, 0 },
+		fov = 62,
+		ghostStatue = true,
+		avatars = { { position = polar(180, 14, 0), yaw = 0 } },
+	},
+	{
 		id = "09-far-side",
 		title = "9. Far side view",
 		caption = "Hub on its high shelf, the stepped drop and the abyss. Haze reduced for review.",
@@ -239,6 +284,8 @@ local scene = {
 	depthLighting = depthLighting,
 	plots = plots,
 	gates = gates,
+	stalls = stallFrames,
+	statueZone = statueZone,
 	views = views,
 }
 fs.writeFile(output, serde.encode("json", scene))

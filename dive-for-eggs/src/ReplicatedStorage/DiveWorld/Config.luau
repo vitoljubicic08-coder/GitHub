@@ -13,7 +13,7 @@ Config.Hub = {
 	FLOOR_Y = 0, -- top of the walkable floor
 	FLOOR_THICKNESS = 4,
 
-	PLAZA_RADIUS = 26, -- 52 stud diameter open plaza
+	PLAZA_RADIUS = 27.5, -- 55 stud plaza: fish statue in the middle, four stalls around it
 	PLAZA_RING_WIDTH = 1.4,
 
 	PLOT_COUNT = 6,
@@ -55,6 +55,48 @@ Config.Hub = {
 
 	SPAWN_ANGLE = 180, -- just inside the front (south) gate
 	SPAWN_RADIUS = 100, -- on the south avenue, facing the plaza
+}
+
+-- Four generic market stalls in the plaza, on the diagonals so the straight lines from
+-- every gate to the statue stay open. Fronts face the statue.
+Config.Stalls = {
+	RADIUS = 20.5, -- stall centre (floor, middle of the posts) from the plaza centre
+	ANGLES = { 45, 135, 225, 315 },
+	COLORS = { "Blue", "Red", "Yellow", "Green" },
+}
+
+-- Stall geometry, measured from the reference turnaround at a 5-stud avatar scale.
+-- Local frame: origin on the floor at the middle of the posts, -Z = front (counter side).
+Config.StallShape = {
+	BODY_WIDTH = 14.2, -- outside of post to outside of post
+	BODY_DEPTH = 8,
+	POST = 1.3,
+	POST_HEIGHT = 8.3,
+	TOP_BEAM = 0.9,
+	ROOF_WIDTH = 16.3,
+	ROOF_FRONT_OVERHANG = 1.6,
+	ROOF_BACK_OVERHANG = 0.8,
+	ROOF_THICKNESS = 1,
+	ROOF_SLOPE_DEG = 5, -- front edge lower
+	ROOF_STRIPES = 7, -- colour, white, colour ... colour
+	COUNTER_TOP = 3.5,
+	COUNTER_THICKNESS = 0.9,
+	COUNTER_FRONT_DEPTH = 2,
+	COUNTER_FRONT_REACH = 0.7, -- how far the counter sticks out past the front posts
+	COUNTER_SIDE_OVERHANG = 0.4,
+	COUNTER_RIM = 1.2, -- side and back counter width
+	RAIL = 0.65,
+	RAIL_HEIGHTS = { 0.65, 1.95 }, -- centre heights of the lower rails
+}
+
+-- The imported fish statue is fitted into the space the stalls leave free.
+Config.Statue = {
+	TARGET_HEIGHT = 26, -- about 2.4x the stall roof, clearly the tallest thing in the plaza
+	MIN_HEIGHT = 15, -- warn if the plaza forces it smaller than this
+	WALK_RING = 6, -- clear walking space between the statue and the stall counters
+	YAW_DEGREES = 0, -- extra turn applied to the imported model (0/90/180/270 ...)
+	COLLISION_HEIGHT = 10,
+	LANTERN_LIGHT = { BRIGHTNESS = 1, RANGE = 9 },
 }
 
 Config.Bubble = {
@@ -116,6 +158,19 @@ Config.Palette = {
 	Threshold = rgb(150, 166, 196),
 	Skirt = rgb(62, 82, 122),
 	Base = rgb(54, 72, 110),
+
+	WoodMain = rgb(164, 96, 50),
+	WoodDark = rgb(132, 74, 38),
+	WoodLight = rgb(198, 124, 64),
+	CanopyWhite = rgb(246, 248, 252),
+	Canopy = {
+		Blue = rgb(24, 150, 255),
+		Red = rgb(232, 52, 52),
+		Yellow = rgb(255, 200, 40),
+		Green = rgb(64, 192, 72),
+	},
+	StatueLanternGlow = rgb(255, 206, 118),
+	StatueLanternLight = rgb(255, 196, 110),
 
 	LanternFrame = rgb(46, 52, 70),
 	LanternGlow = rgb(255, 184, 96),

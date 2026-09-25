@@ -16,6 +16,7 @@
     text-shadow: 0 0 4px #0b2a4a, 0 0 8px #0b2a4a; pointer-events: none; }
   .plot { font-size: 44px; }
   .gate { font-size: 16px; background: rgba(8, 30, 56, 0.7); padding: 2px 6px; border-radius: 5px; }
+  .quad { font-size: 30px; }
 </style>
 </head>
 <body>
@@ -56,17 +57,26 @@ function sampleDepth(depth) {
   }
 }
 
-const camPos = new THREE.Vector3(...view.position);
+// Turnaround views render one stall on its own, from its own local frame.
+const turn = view.turnaround ? scene.stalls[view.turnaround] : null;
+function stallPoint([x, y, z]) {
+  const [px, py, pz, r00, r01, r02, r10, r11, r12, r20, r21, r22] = turn;
+  return new THREE.Vector3(px + r00 * x + r01 * y + r02 * z, py + r10 * x + r11 * y + r12 * z, pz + r20 * x + r21 * y + r22 * z);
+}
+
+const camPos = turn ? stallPoint([0, 6.5, -27]) : new THREE.Vector3(...view.position);
 const depth = Math.max(0, scene.floorY - camPos.y);
 const look = sampleDepth(depth);
 
 const world = new THREE.Scene();
 const fogColor = look.atmosphereColor.clone().lerp(look.atmosphereDecay, 0.35);
-const fogScale = view.fogScale ?? 1;
+const fogScale = turn ? 0 : view.fogScale ?? 1;
 if (fogScale > 0) world.fog = new THREE.FogExp2(fogColor, look.atmosphereDensity * 0.0042 * fogScale);
 
 // Underwater backdrop: bright toward the surface, deep blue below.
-{
+if (turn) {
+  renderer.setClearColor(new THREE.Color("#6f7ea0"));
+} else {
   const geo = new THREE.SphereGeometry(6000, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
@@ -87,8 +97,13 @@ if (fogScale > 0) world.fog = new THREE.FogExp2(fogColor, look.atmosphereDensity
   world.add(sky);
 }
 
-world.add(new THREE.HemisphereLight(look.outdoorAmbient, look.ambient.clone().multiplyScalar(0.55), 1.35));
-world.add(new THREE.AmbientLight(look.ambient, 0.35));
+if (turn) {
+  // Neutral studio light, like the reference sheet.
+  world.add(new THREE.HemisphereLight(new THREE.Color("#ffffff"), new THREE.Color("#8a8f9c"), 2.7));
+} else {
+  world.add(new THREE.HemisphereLight(look.outdoorAmbient, look.ambient.clone().multiplyScalar(0.55), 1.35));
+  world.add(new THREE.AmbientLight(look.ambient, 0.35));
+}
 const sun = new THREE.DirectionalLight(new THREE.Color("#fff6e6"), 0.55 * look.brightness);
 sun.position.set(120, 600, 180);
 sun.target.position.set(0, 0, 0);
@@ -137,6 +152,7 @@ function studMaterial(base) {
 const unitBox = new THREE.BoxGeometry(1, 1, 1);
 const groups = { solid: [], neon: [], shell: [], water: [] };
 for (const p of scene.parts) {
+  if (turn && p[19] !== view.turnaround) continue;
   const kind = p[17];
   (kind === 0 ? groups.solid : kind === 1 ? groups.neon : kind === 2 ? groups.shell : groups.water).push(p);
 }
@@ -151,6 +167,7 @@ function matrixOf(p) {
 }
 
 function instanced(list, material, withStuds) {
+  if (list.length === 0) return new THREE.Group();
   const mesh = new THREE.InstancedMesh(unitBox.clone(), material, list.length);
   const studs = new Float32Array(list.length);
   list.forEach((p, i) => {
@@ -205,7 +222,7 @@ for (const p of groups.shell) {
 // Warm lantern glow: a few real lights near the camera, sprites for the rest.
 const sortedLights = scene.lights.slice().sort((a, b) =>
   camPos.distanceTo(new THREE.Vector3(a[0], a[1], a[2])) - camPos.distanceTo(new THREE.Vector3(b[0], b[1], b[2])));
-sortedLights.slice(0, 8).forEach((l) => {
+sortedLights.slice(0, turn ? 0 : 8).forEach((l) => {
   const light = new THREE.PointLight(new THREE.Color("#" + l[3]), 2.2, l[4] * 1.6, 1.2);
   light.position.set(l[0], l[1], l[2]);
   world.add(light);
@@ -218,7 +235,7 @@ sortedLights.slice(0, 8).forEach((l) => {
   g.addColorStop(0, "rgba(255,210,140,0.9)"); g.addColorStop(1, "rgba(255,180,100,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
   const tex = new THREE.CanvasTexture(canvas);
-  for (const l of scene.lights) {
+  for (const l of turn ? [] : scene.lights) {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
     sprite.position.set(l[0], l[1], l[2]);
     sprite.scale.setScalar(7);
@@ -243,9 +260,33 @@ function avatar(pos, yaw) {
   world.add(group);
 }
 for (const a of view.avatars ?? []) avatar(a.position, a.yaw);
+if (turn) {
+  const at = stallPoint([-10.5, 0, -3]);
+  const centre = stallPoint([0, 0, 0]);
+  avatar([at.x, at.y, at.z], Math.atan2(-(centre.x - at.x), -(centre.z - at.z)));
+}
+
+// Space reserved for the imported statue (preview only).
+if (view.ghostStatue) {
+  const { radius, height: tall } = scene.statueZone;
+  const ghost = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, tall, 64, 1, true),
+    new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
+  ghost.position.set(0, scene.floorY + tall / 2, 0);
+  world.add(ghost);
+  for (const y of [0.05, tall / 2, tall]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.12, 6, 96),
+      new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.6 }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, scene.floorY + y, 0);
+    world.add(ring);
+  }
+}
 
 let camera;
-if (view.ortho) {
+if (turn) {
+  camera = new THREE.PerspectiveCamera(40, 1.6, 0.5, 500);
+} else if (view.ortho) {
   const h = view.halfSize, aspect = width / height;
   camera = new THREE.OrthographicCamera(-h * aspect, h * aspect, h, -h, 1, 3000);
 } else {
@@ -253,7 +294,7 @@ if (view.ortho) {
 }
 camera.position.copy(camPos);
 if (view.up) camera.up.set(...view.up);
-camera.lookAt(new THREE.Vector3(...view.target));
+camera.lookAt(turn ? stallPoint([0, 5, 0]) : new THREE.Vector3(...view.target));
 camera.updateMatrixWorld();
 
 document.querySelector("#caption b").textContent = view.title;
@@ -272,7 +313,38 @@ if (view.labels) {
   for (const g of scene.gates) place(g.position, g.name + " gate", "gate");
 }
 
-renderer.render(world, camera);
+const overlay = (x, y, text, cls) => {
+  const el = document.createElement("div");
+  el.className = "label " + cls;
+  el.textContent = text;
+  el.style.left = x + "px";
+  el.style.top = y + "px";
+  document.body.appendChild(el);
+};
+if (view.ghostStatue) {
+  const top = new THREE.Vector3(0, scene.floorY + scene.statueZone.height + 2, 0).project(camera);
+  overlay(((top.x + 1) / 2) * width, ((1 - top.y) / 2) * height, "imported fish statue", "gate");
+}
+
+if (turn) {
+  // Four quadrants like the reference sheet: front, left, right, back.
+  const shots = [["Front", [0, 6.5, -27]], ["Left", [21, 8, -17]], ["Right", [-21, 8, -17]], ["Back", [0, 6.5, 27]]];
+  const qw = width / 2, qh = height / 2;
+  renderer.setScissorTest(true);
+  shots.forEach(([label, local], i) => {
+    const qx = (i % 2) * qw, qTop = Math.floor(i / 2) * qh;
+    renderer.setViewport(qx, height - qTop - qh, qw, qh);
+    renderer.setScissor(qx, height - qTop - qh, qw, qh);
+    const cam = new THREE.PerspectiveCamera(40, qw / qh, 0.5, 500);
+    cam.position.copy(stallPoint(local));
+    cam.lookAt(stallPoint([-1.5, 4.8, 0]));
+    cam.updateMatrixWorld();
+    renderer.render(world, cam);
+    overlay(qx + qw / 2, qTop + qh - 34, label, "plot quad");
+  });
+} else {
+  renderer.render(world, camera);
+}
 window.__rendered = true;
 </script>
 </body>

@@ -23,6 +23,7 @@ local function environment(scriptInstance)
 		CFrame = roblox.CFrame,
 		Color3 = roblox.Color3,
 		Enum = roblox.Enum,
+		Content = roblox.Content,
 		require = requireModule,
 		warn = function(...)
 			print("[warn]", ...)

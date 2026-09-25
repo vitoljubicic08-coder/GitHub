@@ -2,6 +2,7 @@
 -- foundation pads, the retaining wall, four waterfall gates and the spawn.
 -- The interior is deliberately empty apart from the floor, pads, walls and gates.
 
+local StallBuilder = require(script.Parent.StallBuilder)
 local Util = require(script.Parent.Util)
 
 local HubBuilder = {}
@@ -143,12 +144,14 @@ local function buildFloor(hub: Instance, H, P)
 	end
 end
 
-local function buildPattern(hub: Instance, H, P)
+local function buildPattern(hub: Instance, Config)
+	local H, P = Config.Hub, Config.Palette
 	local folder = Util.folder("FloorPattern", hub)
 	local F = H.FLOOR_Y
 	local span = sectorSpan(H)
 
-	-- Central plaza: nothing but a double trim ring on the floor.
+	-- Central plaza: an outer trim ring, and a thin ring just outside the statue zone
+	-- that marks the walkway between the statue and the stalls.
 	Util.arc({
 		name = "PlazaRing",
 		radius = H.PLAZA_RADIUS,
@@ -163,8 +166,8 @@ local function buildPattern(hub: Instance, H, P)
 		parent = folder,
 	})
 	Util.arc({
-		name = "PlazaInnerRing",
-		radius = H.PLAZA_RADIUS - 2.6,
+		name = "StatueRing",
+		radius = StallBuilder.statueRadius(Config) + 0.8,
 		width = 0.5,
 		fromDeg = 0,
 		toDeg = 360,
@@ -678,7 +681,7 @@ function HubBuilder.build(parent: Instance, Config): Model
 	local H, P = Config.Hub, Config.Palette
 	local hub = Util.model("Hub", parent)
 	buildFloor(hub, H, P)
-	buildPattern(hub, H, P)
+	buildPattern(hub, Config)
 	buildPlots(hub, H, P)
 	buildWall(hub, H, P)
 	local gates = Util.folder("Gates", hub)
@@ -687,6 +690,7 @@ function HubBuilder.build(parent: Instance, Config): Model
 		buildGate(gates, Config, index, rng)
 	end
 	buildSpawn(hub, H)
+	StallBuilder.build(hub, Config, Vector3.new(0, H.FLOOR_Y, 0))
 	return hub
 end
 

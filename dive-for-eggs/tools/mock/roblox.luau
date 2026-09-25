@@ -210,9 +210,15 @@ local CLASS_DEFAULTS = {
 	end,
 }
 CLASS_DEFAULTS.SpawnLocation = CLASS_DEFAULTS.Part
+CLASS_DEFAULTS.MeshPart = function(p)
+	CLASS_DEFAULTS.Part(p)
+	p.MeshId = ""
+	p.TextureID = ""
+end
 
 local IS_A = {
-	BasePart = { Part = true, SpawnLocation = true },
+	BasePart = { Part = true, SpawnLocation = true, MeshPart = true },
+	PVInstance = { Part = true, SpawnLocation = true, MeshPart = true, Model = true },
 	Part = { Part = true, SpawnLocation = true },
 	Folder = { Folder = true },
 	Model = { Model = true },
@@ -343,13 +349,144 @@ function Instance.GetFullName(inst)
 	return table.concat(names, ".")
 end
 
+function Instance.IsDescendantOf(inst, ancestor)
+	local node = rawget(inst, "_parent")
+	while node do
+		if node == ancestor then
+			return true
+		end
+		node = rawget(node, "_parent")
+	end
+	return false
+end
+function Instance.FindFirstAncestorWhichIsA(inst, className)
+	local node = rawget(inst, "_parent")
+	while node do
+		if node:IsA(className) then
+			return node
+		end
+		node = rawget(node, "_parent")
+	end
+	return nil
+end
+function Instance.FindFirstChildWhichIsA(inst, className)
+	for _, c in rawget(inst, "_children") do
+		if c:IsA(className) then
+			return c
+		end
+	end
+	return nil
+end
+
+-- Deep copy, remapping PrimaryPart to the copy's own part like Roblox does.
+function Instance.Clone(inst)
+	local map = {}
+	local function copy(node)
+		local clone = setmetatable({
+			ClassName = rawget(node, "ClassName"),
+			_props = table.clone(rawget(node, "_props")),
+			_children = {},
+			_attributes = table.clone(rawget(node, "_attributes")),
+			_source = rawget(node, "_source"),
+			_scale = rawget(node, "_scale"),
+		}, instanceMeta)
+		map[node] = clone
+		for _, child in rawget(node, "_children") do
+			local c = copy(child)
+			rawset(c, "_parent", clone)
+			table.insert(rawget(clone, "_children"), c)
+		end
+		return clone
+	end
+	local root = copy(inst)
+	for original, clone in map do
+		local primary = rawget(original, "_props").PrimaryPart
+		if primary and map[primary] then
+			rawget(clone, "_props").PrimaryPart = map[primary]
+		end
+	end
+	return root
+end
+
+local function boxCentre(inst)
+	local lo, hi = nil, nil
+	for _, d in inst:GetDescendants() do
+		if d:IsA("BasePart") then
+			local p = d.CFrame.p
+			lo = if lo then Vector3.new(math.min(lo.x, p.x), math.min(lo.y, p.y), math.min(lo.z, p.z)) else p
+			hi = if hi then Vector3.new(math.max(hi.x, p.x), math.max(hi.y, p.y), math.max(hi.z, p.z)) else p
+		end
+	end
+	return if lo then (lo + hi) / 2 else Vector3.zero
+end
+
+function Instance.GetPivot(inst)
+	local props = rawget(inst, "_props")
+	if inst:IsA("BasePart") then
+		return props.CFrame
+	elseif props.PrimaryPart then
+		return props.PrimaryPart.CFrame
+	elseif props.WorldPivot then
+		return props.WorldPivot
+	end
+	return cfNew(boxCentre(inst))
+end
+
+function Instance.PivotTo(inst, target)
+	local delta = target * inst:GetPivot():Inverse()
+	if inst:IsA("BasePart") then
+		inst.CFrame = target
+		return
+	end
+	for _, d in inst:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.CFrame = delta * d.CFrame
+		end
+	end
+	local props = rawget(inst, "_props")
+	if not props.PrimaryPart then
+		props.WorldPivot = target
+	end
+end
+
+function Instance.GetScale(inst)
+	return rawget(inst, "_scale") or 1
+end
+
+function Instance.ScaleTo(inst, scale)
+	local k = scale / inst:GetScale()
+	local pivot = inst:GetPivot()
+	local inverse = pivot:Inverse()
+	for _, d in inst:GetDescendants() do
+		if d:IsA("BasePart") then
+			local rel = inverse * d.CFrame
+			d.CFrame = pivot * cf(rel.p * k, rel.rx, rel.ry, rel.rz)
+			d.Size = d.Size * k
+		end
+	end
+	rawset(inst, "_scale", scale)
+end
+
 M.Instance = { new = newInstance }
 
 ----------------------------------------------------------------------------- DataModel
 local game = newInstance("DataModel")
 game.Name = "game"
 local services = {}
-for _, name in { "Workspace", "Lighting", "ReplicatedStorage", "ServerScriptService", "Players", "StarterPlayer" } do
+for _, name in
+	{
+		"Workspace",
+		"Lighting",
+		"ReplicatedStorage",
+		"ServerScriptService",
+		"ServerStorage",
+		"Players",
+		"StarterPlayer",
+		"Selection",
+		"ChangeHistoryService",
+		"AssetService",
+	}
+do
 	local service = newInstance(name)
 	service.Name = name
 	service.Parent = game
@@ -381,9 +518,40 @@ end
 
 local players = services.Players
 players.CharacterAutoLoads = true
+function Instance.GetPlayerFromCharacter()
+	return nil
+end
 function Instance.GetPlayers()
 	return {}
 end
+
+-- Studio-only services used by the plaza update tool.
+M.selection = {}
+function Instance.Get(_)
+	return table.clone(M.selection)
+end
+function Instance.Set(_, list)
+	M.selection = list
+end
+M.waypoints = {}
+function Instance.SetWaypoint(_, name)
+	table.insert(M.waypoints, name)
+end
+function Instance.CreateEditableMeshAsync()
+	error("mock: EditableMesh is not available offline")
+end
+function Instance.CreateEditableImageAsync()
+	error("mock: EditableImage is not available offline")
+end
+
+M.Content = {
+	fromUri = function(uri)
+		return { Uri = uri }
+	end,
+	fromAssetId = function(id)
+		return { Uri = "rbxassetid://" .. tostring(id) }
+	end,
+}
 
 M.game = game
 M.workspace = workspace

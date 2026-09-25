@@ -57,7 +57,7 @@ GitHub/
 └── CLAUDE.md         # This file
 ```
 
-For `dive-for-eggs/`, run `lune run tools/check-world.luau` before committing, and regenerate the installer with `lune run tools/bundle-studio.luau` whenever `src/` changes.
+For `dive-for-eggs/`, run `lune run tools/check-world.luau` and `lune run tools/check-plaza-update.luau` before committing, and regenerate the `studio/` paste-in files with `lune run tools/bundle-studio.luau` whenever `src/` changes.
 
 ### Planned Structure
 *Document the intended directory structure as it develops*

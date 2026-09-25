@@ -1,5 +1,6 @@
 -- Builds (or rebuilds) the whole starter world. Safe to run repeatedly: the previous
--- DiveStarterWorld folder is removed first. Run from the Studio command bar to bake it:
+-- DiveStarterWorld folder is replaced, except Hub.CentralPlaza, which holds imported
+-- assets (the fish statue) and is carried over untouched. Run from the command bar:
 --   require(game.ServerScriptService.DiveWorldBuild.WorldBuilder).build()
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,6 +18,11 @@ local WorldBuilder = {}
 
 function WorldBuilder.build(): Folder
 	local old = workspace:FindFirstChild(Config.WORLD_FOLDER_NAME)
+	local oldHub = old and old:FindFirstChild("Hub")
+	local keep = oldHub and oldHub:FindFirstChild("CentralPlaza")
+	if keep then
+		keep.Parent = nil
+	end
 	if old then
 		old:Destroy()
 	end
@@ -26,7 +32,10 @@ function WorldBuilder.build(): Folder
 	world.Name = Config.WORLD_FOLDER_NAME
 	world:SetAttribute("Layout", "SixPlazaHub")
 
-	HubBuilder.build(world, Config)
+	local hub = HubBuilder.build(world, Config)
+	if keep then
+		keep.Parent = hub
+	end
 	BubbleBuilder.build(world, Config)
 	local shape = SeabedShape.new(Config)
 	local ground = SeabedBuilder.build(world, Config, shape)

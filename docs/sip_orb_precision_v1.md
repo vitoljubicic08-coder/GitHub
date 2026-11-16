@@ -125,6 +125,45 @@ TradingView's data feed. The static tests check the Pine sources for these thing
    * There are no offsets, pivots, `security_lower_tf` calls or future references.
 8. **Remaining limitations:** see below.
 
+## Offline backtest (Python replication, Yahoo Finance data)
+
+This is **not** a TradingView Strategy Tester run. `backtest/sip_orb_backtest.py` replays Yahoo Finance
+5-minute bars through the reference engine. It also runs a broker emulator that applies the strategy's
+rules: next-bar-open fills, 2 ticks of slippage per fill, a stop at 10% of ATR measured from the fill,
+$0.005 per share per side, and the end-of-day exit at 15:55. Each symbol is its own $10,000 account,
+as in TradingView.
+
+* **Data:** 2,961 US common stocks from the NASDAQ Trader listings, loosely pre-filtered on price and
+  volume. 5-minute bars cover 2026-08-21 to 2026-11-13, which is Yahoo's 60-day limit. The first 14
+  sessions only build the opening-volume history, so trades run from 2026-09-11.
+* **Result:** 3,419 trades on 1,299 symbols.
+  * Win rate 13.3%, average **−0.26R** (median −1.14R), profit factor **0.76**.
+  * Bootstrap 95% CI of the mean: **[−0.36R, −0.16R]**.
+  * The first 1,000 trades in time order: average −0.35R, profit factor 0.68.
+* **Where the losses come from:** frictionless R (slippage and commission removed) averages
+  **+0.09R**.
+  * The median stop distance is $0.17, so the specified friction (4¢ slippage plus 1¢ commission per
+    share per round trip) costs about 0.29R per trade.
+  * The damage is worst on $5–20 stocks: average −0.52R, profit factor 0.58.
+* **Fat tails:** 470 trades reached the end-of-day exit and averaged +5.7R. The best 5% of trades
+  produced +1,816R, and without them the average is −0.83R.
+* **Caveats:**
+  * 60 days is one short market regime.
+  * The listing only includes stocks that exist today, so delisted names are missing (survivorship
+    bias).
+  * Yahoo bars and volumes can differ from TradingView's feed.
+  * The results add up independent accounts. They are not one portfolio.
+
+Files: `backtest/results/summary.json`, `backtest/results/trades.csv`, `backtest/results/breakdown.txt`.
+To reproduce:
+
+```bash
+pip install yfinance pandas
+python3 backtest/fetch_yahoo_data.py --out data
+python3 backtest/sip_orb_backtest.py --data data --out backtest/results --min-trades 1000
+python3 backtest/analyze_trades.py backtest/results/trades.csv
+```
+
 ## Known limitations
 
 * **Not compiled here.** The scripts were reviewed against the v6 reference but not compiled in

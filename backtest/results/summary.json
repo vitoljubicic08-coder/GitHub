@@ -1,0 +1,42 @@
+{
+  "trades": 3419,
+  "symbols_traded": 1299,
+  "symbols_simulated": 2961,
+  "first_entry": "2026-09-11T09:40:00-04:00",
+  "last_exit": "2026-11-13T15:55:00-05:00",
+  "win_rate_pct": 13.278736472652822,
+  "avg_r": -0.26020435907497313,
+  "median_r": -1.144512818679088,
+  "best_r": 52.613437270682304,
+  "worst_r": -2.3072401023134397,
+  "sum_r": -889.6387036773332,
+  "max_drawdown_r": -1080.0781752666394,
+  "profit_factor": 0.7640028192836035,
+  "net_pnl_usd": -20242.453,
+  "commission_usd": 5720.99,
+  "avg_net_pnl_usd": -5.920577069318514,
+  "avg_return_pct_of_equity": -0.059187868064331,
+  "avg_entry_notional_pct": 67.22688229595506,
+  "entries_above_100pct_notional": 13,
+  "longest_losing_streak": 362,
+  "exit_reasons": {
+    "Stop": 2885,
+    "EOD 15:55": 470,
+    "Stop (gap)": 64
+  },
+  "long": {
+    "trades": 1602,
+    "win_rate_pct": 10.986267166042447,
+    "avg_r": -0.4242519369161585,
+    "net_pnl": -15690.0197
+  },
+  "short": {
+    "trades": 1817,
+    "win_rate_pct": 15.299944964226748,
+    "avg_r": -0.11556802462171009,
+    "net_pnl": -4552.4333
+  },
+  "accounts_profitable_pct": 10.368118878757176,
+  "avg_account_return_pct": -0.06836357350131397,
+  "trades_left_open_at_end_of_data": 0
+}

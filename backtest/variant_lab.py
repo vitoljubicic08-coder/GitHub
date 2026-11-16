@@ -54,6 +54,7 @@ class Variant:
     min_gap_atr: float = 0.0           # |gap| >= x * ATR
     min_pre_ratio: float = 0.0         # premarket volume / average opening-bar volume
     spy_align: bool = False            # SPY's opening range moves the same way as the trade
+    min_stop_usd: float = 0.0          # skip trades whose stop distance (known at entry) is smaller
     slip_ticks: int = SLIP_TICKS
     resolution: int = 1
     notes: str = field(default="", compare=False)
@@ -239,6 +240,8 @@ def simulate(data: dict, v: Variant) -> dict:
         dist = d * (fill - stop)
         bad = dist <= 0
         dist = np.where(bad, np.nan, dist)
+    if v.min_stop_usd > 0:                       # cost control: costs are fixed in cents per share
+        dist = np.where(dist >= v.min_stop_usd, dist, np.nan)
     target = fill + d * v.target_r * dist if v.target_r else None
 
     after = tt > ent_i[:, None]

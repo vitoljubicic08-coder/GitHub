@@ -1,0 +1,19 @@
+{
+ "top10": [
+  "QQQ|noise_break|1.0|0.3|1|2.0",
+  "QQQ|noise_break|1.0|0.3|1|3.0",
+  "QQQ|noise_break|1.0|0.3|2|2.0",
+  "QQQ|noise_break|1.5|0.3|2|2.0",
+  "QQQ|vwap_break|1.5|0.3|1|3.0",
+  "QQQ|orb|15|0.3|1|2.0",
+  "SPY|vwap_break|1.0|0.2|2|3.0",
+  "QQQ|noise_break|1.5|0.2|2|3.0",
+  "QQQ|noise_break|1.5|0.3|2|3.0",
+  "QQQ|noise_break|1.0|0.3|2|3.0"
+ ],
+ "p2": [
+  "QQQ|noise_break|1.0|0.3|1|2.0",
+  "TSLA|noise_break|1.0|0.3|1|3.0"
+ ],
+ "nb3": "QQQ|noise_break|1.5|0.2|1|3.0"
+}

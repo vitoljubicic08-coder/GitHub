@@ -1,0 +1,291 @@
+//@version=6
+// =============================================================================
+// SIP-ORB PRECISION V1 - BACKTESTING STRATEGY
+// -----------------------------------------------------------------------------
+// Hypothetical backtest of the SIP-ORB Precision V1 signals. The SIGNAL ENGINE
+// block below is byte-identical to the production indicator, so both scripts
+// mark exactly the same candles. To verify, add both scripts to one chart (the
+// arrows must coincide) or compare "Diag: signal" in the Data Window.
+//
+// Inspired by the "Stocks in Play" opening-range research of Zarattini, Barbon
+// & Aziz (Swiss Finance Institute Research Paper N. 24-98). This is a MODIFIED
+// implementation and does not reproduce the paper's published results.
+//
+// FIXED BACKTEST ASSUMPTIONS
+//   Initial capital ...... 10,000 USD (hypothetical)
+//   Risk per trade ....... 0.25% of current strategy equity
+//   Max gross notional ... 100% of current equity, no leverage
+//                          (margin_long = margin_short = 100)
+//   Positions ............ max one per symbol per day, no pyramiding
+//   Entry ................ market order submitted at the confirmed signal
+//                          close; TradingView fills it at the NEXT bar's open
+//   Initial stop ......... 10% of the previous completed daily ATR(14), measured
+//                          from the ACTUAL simulated fill price (strategy.exit
+//                          "loss" is relative to the entry fill)
+//   Profit target ........ none (no fixed 3R target, trailing or break-even)
+//   End of day ........... market close submitted when the 15:50 candle is
+//                          confirmed, so it fills at the 15:55 bar's open
+//   Commission ........... 0.005 USD per share, per side
+//   Slippage ............. 2 ticks on every market and stop fill
+//   Bar Magnifier ........ requested (use_bar_magnifier = true); it only takes
+//                          effect on TradingView plans that offer it
+//
+// POSITION SIZE (whole shares)
+//   shares         = min(floor(riskBudget / stopDistance), floor(equity / referencePrice))
+//   riskBudget     = 0.25% x current equity
+//   stopDistance   = 0.10 x previous completed daily ATR(14)
+//   referencePrice = signal close + 2 ticks (modelled worst fill before any gap)
+//   If shares < 1 the trade is skipped.
+//
+// ACTUAL RISK WILL DIFFER FROM THE PLANNED 0.25%
+//   The planned loss at the stop is shares x stopDistance <= 0.25% of equity.
+//   Realised losses can be larger or smaller because of slippage on the entry
+//   and stop fills, commissions, price gaps through the stop (the stop then
+//   fills at the worse bar open), stop prices rounded to the symbol's tick
+//   size, and the next-bar-open entry price differing from the signal close.
+//   A gap at the entry bar can also push notional slightly above 100% of
+//   equity; TradingView's margin model may then reduce the position.
+//
+// EARLY-CLOSE DAYS AND FAILSAFES
+//   A position still open on the last regular bar of a shortened session, on a
+//   regular bar from 15:55, or on any extended-hours or next-session bar is
+//   closed at that bar's close (strategy.close_all with immediately = true).
+//   Overnight holds are never intended.
+//
+// This is a research tool. Simulated results do not guarantee future results.
+// =============================================================================
+strategy("SIP-ORB Precision V1 [Backtest]", shorttitle = "SIP-ORB V1 BT", overlay = true,
+     initial_capital = 10000, currency = currency.USD,
+     default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.005,
+     slippage = 2, margin_long = 100, margin_short = 100,
+     process_orders_on_close = false, calc_on_every_tick = false, calc_on_order_fills = false,
+     use_bar_magnifier = true, fill_orders_on_standard_ohlc = true)
+
+// ==== BEGIN SIP-ORB SIGNAL ENGINE (must stay byte-identical in indicator and strategy) ====
+
+// -----------------------------------------------------------------------------
+// E1. Fixed parameters. Hard-coded by specification; never optimise them.
+// -----------------------------------------------------------------------------
+TZ                = "America/New_York" // IANA zone: daylight saving handled automatically
+MIN_OPEN_PRICE    = 5.0                // Filter A: openingOpen must be > $5.00
+MIN_AVG_DAILY_VOL = 1000000.0          // Filter B: 14-session mean daily volume >= 1,000,000
+MIN_DAILY_ATR     = 0.50               // Filter C: previous-day ATR(14) must be > $0.50
+MIN_OPEN_RVOL     = 2.0                // Filter D: opening relative volume must be >= 2.0
+LOOKBACK          = 14                 // sessions used by filters B, C and D
+OPEN_MOD          = 570                // 09:30 New York, in minutes after midnight
+WINDOW_START_MOD  = 575                // 09:35, first bar allowed to signal (inclusive)
+WINDOW_END_MOD    = 660                // 11:00, end of the signal window (exclusive)
+SESSION_END_MOD   = 960                // 16:00, end of the regular session (exclusive)
+
+// -----------------------------------------------------------------------------
+// E2. Chart and instrument validation. Incompatible charts are rejected.
+// -----------------------------------------------------------------------------
+bool chartIsFiveMinute = timeframe.isminutes and timeframe.multiplier == 5
+bool chartIsStandard   = chart.is_standard
+bool symbolIsStock     = syminfo.type == "stock"
+bool symbolIsUsListed  = syminfo.prefix == "NYSE" or syminfo.prefix == "NASDAQ" or syminfo.prefix == "AMEX"
+bool symbolIsUsd       = syminfo.currency == "USD"
+bool setupIsValid      = chartIsFiveMinute and chartIsStandard and symbolIsStock and symbolIsUsListed and symbolIsUsd
+
+if not chartIsFiveMinute
+    runtime.error("SIP-ORB V1 rejected: a 5-minute chart is required (current timeframe: " + timeframe.period + ").")
+if not chartIsStandard
+    runtime.error("SIP-ORB V1 rejected: use a standard candlestick chart. Heikin Ashi, Renko, Kagi, Point & Figure, Line Break and Range charts are not supported.")
+if not (symbolIsStock and symbolIsUsListed and symbolIsUsd)
+    runtime.error("SIP-ORB V1 rejected: only individual USD stocks listed on NYSE, NASDAQ or NYSE American are supported (type: " + syminfo.type + ", exchange: " + syminfo.prefix + ", currency: " + syminfo.currency + ").")
+
+// -----------------------------------------------------------------------------
+// E3. Previous completed daily session data (no look-ahead).
+// The [1] offset combined with barmerge.lookahead_on returns the value of the
+// LAST COMPLETED daily bar on every intraday bar of the current day, both on
+// historical and real-time bars. The ticker is forced to the regular session
+// so that extended-hours chart settings cannot alter the daily series.
+// -----------------------------------------------------------------------------
+string DAILY_TICKER = ticker.modify(syminfo.tickerid, session.regular)
+[prevDailyAtr, prevDailyVolSum] = request.security(DAILY_TICKER, "D", [ta.atr(LOOKBACK)[1], math.sum(volume, LOOKBACK)[1]], lookahead = barmerge.lookahead_on)
+
+// -----------------------------------------------------------------------------
+// E4. New York clock for the current bar (bar OPEN time).
+// -----------------------------------------------------------------------------
+int  nyMod       = hour(time, TZ) * 60 + minute(time, TZ)
+int  nyDow       = dayofweek(time, TZ)
+int  nyDateKey   = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+bool isWeekdayNY = nyDow >= dayofweek.monday and nyDow <= dayofweek.friday
+bool inRegular   = session.ismarket and isWeekdayNY and nyMod >= OPEN_MOD and nyMod < SESSION_END_MOD
+
+// -----------------------------------------------------------------------------
+// E5. Session state. Every value is reset on the first regular bar of a new
+// New York trading date and frozen after the 09:30 candle has closed.
+// -----------------------------------------------------------------------------
+var int   sessDateKey      = na    // NY date (yyyymmdd) of the session being tracked
+var bool  sessHasOpening   = false // a valid 09:30 candle was captured today
+var int   sessDirection    = 0     // +1 BUY only, -1 SELL only, 0 no signals today
+var bool  sessEligible     = false // all eligibility filters passed (frozen at 09:35)
+var bool  sessSignalLocked = false // a signal already fired today
+var float openingHigh      = na
+var float openingLow       = na
+var float openingOpen      = na
+var float openingClose     = na
+var float openingVolume    = na
+var float sessOpeningRvol  = na    // today's opening RVOL (diagnostic)
+var float sessPrevAtr      = na    // previous completed daily ATR(14), frozen at 09:35
+var float sessPrevAvgVol   = na    // previous 14-session mean daily volume, frozen at 09:35
+
+// Rolling history of the 14 most recent valid 09:30-09:35 candle volumes.
+var array<float> openingVolHistory = array.new<float>()
+
+bool buySignal      = false
+bool sellSignal     = false
+bool sessionStarted = false
+
+// -----------------------------------------------------------------------------
+// E6. Engine. Runs only on confirmed (closed) regular-session bars.
+// -----------------------------------------------------------------------------
+if barstate.isconfirmed and inRegular
+    if na(sessDateKey) or nyDateKey != sessDateKey
+        // ---- New regular session: reset everything --------------------------
+        sessionStarted   := true
+        sessDateKey      := nyDateKey
+        sessHasOpening   := false
+        sessDirection    := 0
+        sessEligible     := false
+        sessSignalLocked := false
+        openingHigh      := na
+        openingLow       := na
+        openingOpen      := na
+        openingClose     := na
+        openingVolume    := na
+        sessOpeningRvol  := na
+        sessPrevAtr      := na
+        sessPrevAvgVol   := na
+
+        // ---- Opening range: only if the first regular bar opened at 09:30 ----
+        // If today's first regular bar is not the 09:30 candle, sessHasOpening
+        // stays false and the whole session is blocked.
+        if nyMod == OPEN_MOD
+            bool priceDataValid = not na(open) and not na(high) and not na(low) and not na(close) and low > 0 and high >= low
+            bool volumeValid    = not na(volume) and volume > 0
+
+            openingHigh    := high
+            openingLow     := low
+            openingOpen    := open
+            openingClose   := close
+            openingVolume  := volume
+            sessHasOpening := priceDataValid and volumeValid
+            sessDirection  := not sessHasOpening ? 0 : openingClose > openingOpen ? 1 : openingClose < openingOpen ? -1 : 0
+
+            // Filter D uses ONLY previous sessions: evaluate before inserting today.
+            int   histCount = openingVolHistory.size()
+            float histSum   = histCount > 0 ? openingVolHistory.sum() : na
+            bool  histReady = histCount == LOOKBACK and not na(histSum) and histSum > 0
+            sessOpeningRvol := sessHasOpening and histReady ? openingVolume / (histSum / LOOKBACK) : na
+
+            // Threshold tests. Filters B and D are cross-multiplied
+            // (sum >= mean_threshold * N) so integer share volumes compare
+            // exactly, without floating-point rounding at the boundary.
+            bool passPrice = sessHasOpening and openingOpen > MIN_OPEN_PRICE
+            bool passLiq   = not na(prevDailyVolSum) and prevDailyVolSum >= MIN_AVG_DAILY_VOL * LOOKBACK
+            bool passAtr   = not na(prevDailyAtr) and prevDailyAtr > MIN_DAILY_ATR
+            bool passRvol  = sessHasOpening and histReady and openingVolume * LOOKBACK >= MIN_OPEN_RVOL * histSum
+
+            // Freeze today's eligibility, direction and daily references.
+            sessPrevAtr    := prevDailyAtr
+            sessPrevAvgVol := na(prevDailyVolSum) ? na : prevDailyVolSum / LOOKBACK
+            sessEligible   := setupIsValid and sessHasOpening and sessDirection != 0 and passPrice and passLiq and passAtr and passRvol
+
+            // Roll the opening-volume history AFTER today's ratio was computed.
+            if volumeValid
+                openingVolHistory.push(openingVolume)
+                if openingVolHistory.size() > LOOKBACK
+                    openingVolHistory.shift()
+    else
+        // ---- Later bars of the same session: breakout detection -------------
+        bool inSignalWindow = nyMod >= WINDOW_START_MOD and nyMod < WINDOW_END_MOD
+        if sessEligible and not sessSignalLocked and inSignalWindow
+            if sessDirection == 1 and close > openingHigh
+                buySignal        := true
+                sessSignalLocked := true
+            else if sessDirection == -1 and close < openingLow
+                sellSignal       := true
+                sessSignalLocked := true
+
+// ==== END SIP-ORB SIGNAL ENGINE ====
+
+// =============================================================================
+// S1. Fixed backtest parameters. Hard-coded by specification.
+// =============================================================================
+RISK_FRACTION         = 0.0025 // 0.25% of current equity per trade
+MAX_NOTIONAL_FRACTION = 1.0    // 100% of current equity, unleveraged
+STOP_ATR_FRACTION     = 0.10   // stop distance = 10% of previous daily ATR(14)
+SLIPPAGE_TICKS        = 2      // must equal strategy(slippage = 2)
+EOD_SUBMIT_MOD        = 950    // 15:50 New York: submit the end-of-day close on this bar
+QTY_EPSILON           = 1e-9   // keeps floor() exact when a ratio such as 250 is stored as 249.99999999999997
+
+var int   entryDateKey = na // NY date of the session that opened the current position
+var float plannedQty   = na // diagnostic: shares of the last submitted entry
+var float plannedStop  = na // diagnostic: stop distance of the last submitted entry
+
+// Frozen at 09:35 together with the rest of today's eligibility.
+float stopDistance = sessPrevAtr * STOP_ATR_FRACTION
+
+if barstate.isconfirmed
+    // -------------------------------------------------------------------------
+    // S2. Hygiene: clear orphaned orders when a new session starts flat.
+    // -------------------------------------------------------------------------
+    if sessionStarted and strategy.position_size == 0
+        strategy.cancel_all()
+
+    // -------------------------------------------------------------------------
+    // S3. End-of-day exit and overnight failsafes.
+    // Normal day: the order is submitted at the 15:50 candle's close and fills
+    // at the 15:55 candle's open. Anything that slips past that is flattened
+    // immediately at the current bar's close.
+    // -------------------------------------------------------------------------
+    if strategy.position_size != 0
+        bool heldFromPriorSession = na(entryDateKey) or entryDateKey != sessDateKey
+        bool isEodSubmitBar       = inRegular and nyMod >= EOD_SUBMIT_MOD and nyMod < EOD_SUBMIT_MOD + 5
+        if isEodSubmitBar and not heldFromPriorSession
+            strategy.close_all(comment = "EOD 15:55")
+        else if heldFromPriorSession or not inRegular or nyMod >= EOD_SUBMIT_MOD + 5 or session.islastbar_regular
+            strategy.close_all(comment = "EOD failsafe", immediately = true)
+
+    // -------------------------------------------------------------------------
+    // S4. Entries: exactly the engine's signals, sized at the signal close.
+    // -------------------------------------------------------------------------
+    if (buySignal or sellSignal) and strategy.position_size == 0
+        float equityNow    = strategy.equity
+        float riskBudget   = equityNow * RISK_FRACTION
+        float referencePx  = close + SLIPPAGE_TICKS * syminfo.mintick
+        int   sharesByRisk = stopDistance > 0 ? math.floor(riskBudget / stopDistance + QTY_EPSILON) : 0
+        int   sharesByCap  = referencePx > 0 ? math.floor(equityNow * MAX_NOTIONAL_FRACTION / referencePx + QTY_EPSILON) : 0
+        int   orderQty     = math.min(sharesByRisk, sharesByCap)
+        if equityNow > 0 and orderQty >= 1
+            // "loss" is in ticks and is applied to the actual entry fill price:
+            // long stop = fill - stopDistance, short stop = fill + stopDistance.
+            float stopTicks = stopDistance / syminfo.mintick
+            if buySignal
+                strategy.entry("Long", strategy.long, qty = orderQty, comment = "SIP-ORB BUY")
+                strategy.exit("Long Stop", from_entry = "Long", loss = stopTicks, comment = "Stop")
+            else
+                strategy.entry("Short", strategy.short, qty = orderQty, comment = "SIP-ORB SELL")
+                strategy.exit("Short Stop", from_entry = "Short", loss = stopTicks, comment = "Stop")
+            entryDateKey := sessDateKey
+            plannedQty   := orderQty
+            plannedStop  := stopDistance
+
+// =============================================================================
+// OUTPUT: the same two arrows as the indicator, on the same signal candles.
+// TradingView adds its own order-fill markers on the execution bars.
+// =============================================================================
+plotshape(buySignal, title = "SIP-ORB BUY", style = shape.arrowup, location = location.belowbar, color = color.rgb(0, 200, 0), size = size.small, display = display.all - display.status_line)
+plotshape(sellSignal, title = "SIP-ORB SELL", style = shape.arrowdown, location = location.abovebar, color = color.rgb(220, 0, 0), size = size.small, display = display.all - display.status_line)
+
+// Invisible diagnostics (Data Window only).
+plot(buySignal ? 1 : sellSignal ? -1 : 0, "Diag: signal (+1 BUY / -1 SELL)", display = display.data_window)
+plot(sessDirection, "Diag: permitted direction", display = display.data_window)
+plot(sessEligible ? 1 : 0, "Diag: session eligible (1/0)", display = display.data_window)
+plot(sessOpeningRvol, "Diag: opening RVOL", display = display.data_window)
+plot(stopDistance, "Diag: stop distance (0.10 x previous ATR)", display = display.data_window)
+plot(plannedQty, "Diag: last planned shares", display = display.data_window)
+plot(plannedStop, "Diag: last planned stop distance", display = display.data_window)

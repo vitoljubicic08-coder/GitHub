@@ -1,0 +1,223 @@
+//@version=6
+// =============================================================================
+// SIP-ORB PRECISION V1 - PRODUCTION INDICATOR
+// -----------------------------------------------------------------------------
+// Volume-filtered 5-minute Opening Range Breakout for individual US-listed
+// stocks. Inspired by the "Stocks in Play" opening-range research of
+// Zarattini, Barbon & Aziz (Swiss Finance Institute Research Paper N. 24-98).
+// This is a MODIFIED implementation. It does not reproduce the paper's
+// published backtest and makes no claim of profitability or win rate.
+//
+// WHAT IS DRAWN
+//   * Green arrow below the bar : SIP-ORB BUY  (first confirmed close above the
+//                                 09:30 candle high on a bullish-opening day)
+//   * Red arrow above the bar   : SIP-ORB SELL (first confirmed close below the
+//                                 09:30 candle low on a bearish-opening day)
+//   Nothing else is drawn. Diagnostic values appear in the Data Window only.
+//
+// REQUIREMENTS (the script stops with a runtime error otherwise)
+//   * 5-minute chart, standard chart type (not Heikin Ashi, Renko, Kagi,
+//     Point & Figure, Line Break or Range).
+//   * Individual stock (syminfo.type == "stock") listed on NYSE, NASDAQ or
+//     NYSE American (TradingView prefix "AMEX"), quoted in USD.
+//   * Regular-hours or extended-hours charts both work, because only bars inside
+//     the regular session (09:30-16:00 America/New_York) are processed.
+//
+// ALERTS
+//   Create Alert -> Condition: this script -> "SIP-ORB BUY" or "SIP-ORB SELL",
+//   frequency "Once Per Bar Close". Both conditions are only true on the
+//   closing execution of a confirmed bar, so an alert cannot fire mid-bar.
+//
+// NON-REPAINTING DESIGN
+//   * All state changes and signals happen only when barstate.isconfirmed.
+//   * Daily filters use request.security(..., expr[1], lookahead_on), which
+//     returns the PREVIOUS completed daily bar on every intraday bar, both on
+//     history and in real time. Today's unfinished daily bar is never used.
+//   * No negative offsets, no pivots, no ZigZag, no future bars.
+//   * Arrows are plotted on the candle whose close triggered them.
+//   * If the data vendor revises historical OHLCV, historical calculations
+//     are recomputed from the revised data and can change. That cannot be
+//     prevented by any script.
+//
+// All parameters are fixed by specification. There are intentionally no inputs.
+// =============================================================================
+indicator("SIP-ORB Precision V1", shorttitle = "SIP-ORB V1", overlay = true)
+
+// ==== BEGIN SIP-ORB SIGNAL ENGINE (must stay byte-identical in indicator and strategy) ====
+
+// -----------------------------------------------------------------------------
+// E1. Fixed parameters. Hard-coded by specification; never optimise them.
+// -----------------------------------------------------------------------------
+TZ                = "America/New_York" // IANA zone: daylight saving handled automatically
+MIN_OPEN_PRICE    = 5.0                // Filter A: openingOpen must be > $5.00
+MIN_AVG_DAILY_VOL = 1000000.0          // Filter B: 14-session mean daily volume >= 1,000,000
+MIN_DAILY_ATR     = 0.50               // Filter C: previous-day ATR(14) must be > $0.50
+MIN_OPEN_RVOL     = 2.0                // Filter D: opening relative volume must be >= 2.0
+LOOKBACK          = 14                 // sessions used by filters B, C and D
+OPEN_MOD          = 570                // 09:30 New York, in minutes after midnight
+WINDOW_START_MOD  = 575                // 09:35, first bar allowed to signal (inclusive)
+WINDOW_END_MOD    = 660                // 11:00, end of the signal window (exclusive)
+SESSION_END_MOD   = 960                // 16:00, end of the regular session (exclusive)
+
+// -----------------------------------------------------------------------------
+// E2. Chart and instrument validation. Incompatible charts are rejected.
+// -----------------------------------------------------------------------------
+bool chartIsFiveMinute = timeframe.isminutes and timeframe.multiplier == 5
+bool chartIsStandard   = chart.is_standard
+bool symbolIsStock     = syminfo.type == "stock"
+bool symbolIsUsListed  = syminfo.prefix == "NYSE" or syminfo.prefix == "NASDAQ" or syminfo.prefix == "AMEX"
+bool symbolIsUsd       = syminfo.currency == "USD"
+bool setupIsValid      = chartIsFiveMinute and chartIsStandard and symbolIsStock and symbolIsUsListed and symbolIsUsd
+
+if not chartIsFiveMinute
+    runtime.error("SIP-ORB V1 rejected: a 5-minute chart is required (current timeframe: " + timeframe.period + ").")
+if not chartIsStandard
+    runtime.error("SIP-ORB V1 rejected: use a standard candlestick chart. Heikin Ashi, Renko, Kagi, Point & Figure, Line Break and Range charts are not supported.")
+if not (symbolIsStock and symbolIsUsListed and symbolIsUsd)
+    runtime.error("SIP-ORB V1 rejected: only individual USD stocks listed on NYSE, NASDAQ or NYSE American are supported (type: " + syminfo.type + ", exchange: " + syminfo.prefix + ", currency: " + syminfo.currency + ").")
+
+// -----------------------------------------------------------------------------
+// E3. Previous completed daily session data (no look-ahead).
+// The [1] offset combined with barmerge.lookahead_on returns the value of the
+// LAST COMPLETED daily bar on every intraday bar of the current day, both on
+// historical and real-time bars. The ticker is forced to the regular session
+// so that extended-hours chart settings cannot alter the daily series.
+// -----------------------------------------------------------------------------
+string DAILY_TICKER = ticker.modify(syminfo.tickerid, session.regular)
+[prevDailyAtr, prevDailyVolSum] = request.security(DAILY_TICKER, "D", [ta.atr(LOOKBACK)[1], math.sum(volume, LOOKBACK)[1]], lookahead = barmerge.lookahead_on)
+
+// -----------------------------------------------------------------------------
+// E4. New York clock for the current bar (bar OPEN time).
+// -----------------------------------------------------------------------------
+int  nyMod       = hour(time, TZ) * 60 + minute(time, TZ)
+int  nyDow       = dayofweek(time, TZ)
+int  nyDateKey   = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+bool isWeekdayNY = nyDow >= dayofweek.monday and nyDow <= dayofweek.friday
+bool inRegular   = session.ismarket and isWeekdayNY and nyMod >= OPEN_MOD and nyMod < SESSION_END_MOD
+
+// -----------------------------------------------------------------------------
+// E5. Session state. Every value is reset on the first regular bar of a new
+// New York trading date and frozen after the 09:30 candle has closed.
+// -----------------------------------------------------------------------------
+var int   sessDateKey      = na    // NY date (yyyymmdd) of the session being tracked
+var bool  sessHasOpening   = false // a valid 09:30 candle was captured today
+var int   sessDirection    = 0     // +1 BUY only, -1 SELL only, 0 no signals today
+var bool  sessEligible     = false // all eligibility filters passed (frozen at 09:35)
+var bool  sessSignalLocked = false // a signal already fired today
+var float openingHigh      = na
+var float openingLow       = na
+var float openingOpen      = na
+var float openingClose     = na
+var float openingVolume    = na
+var float sessOpeningRvol  = na    // today's opening RVOL (diagnostic)
+var float sessPrevAtr      = na    // previous completed daily ATR(14), frozen at 09:35
+var float sessPrevAvgVol   = na    // previous 14-session mean daily volume, frozen at 09:35
+
+// Rolling history of the 14 most recent valid 09:30-09:35 candle volumes.
+var array<float> openingVolHistory = array.new<float>()
+
+bool buySignal      = false
+bool sellSignal     = false
+bool sessionStarted = false
+
+// -----------------------------------------------------------------------------
+// E6. Engine. Runs only on confirmed (closed) regular-session bars.
+// -----------------------------------------------------------------------------
+if barstate.isconfirmed and inRegular
+    if na(sessDateKey) or nyDateKey != sessDateKey
+        // ---- New regular session: reset everything --------------------------
+        sessionStarted   := true
+        sessDateKey      := nyDateKey
+        sessHasOpening   := false
+        sessDirection    := 0
+        sessEligible     := false
+        sessSignalLocked := false
+        openingHigh      := na
+        openingLow       := na
+        openingOpen      := na
+        openingClose     := na
+        openingVolume    := na
+        sessOpeningRvol  := na
+        sessPrevAtr      := na
+        sessPrevAvgVol   := na
+
+        // ---- Opening range: only if the first regular bar opened at 09:30 ----
+        // If today's first regular bar is not the 09:30 candle, sessHasOpening
+        // stays false and the whole session is blocked.
+        if nyMod == OPEN_MOD
+            bool priceDataValid = not na(open) and not na(high) and not na(low) and not na(close) and low > 0 and high >= low
+            bool volumeValid    = not na(volume) and volume > 0
+
+            openingHigh    := high
+            openingLow     := low
+            openingOpen    := open
+            openingClose   := close
+            openingVolume  := volume
+            sessHasOpening := priceDataValid and volumeValid
+            sessDirection  := not sessHasOpening ? 0 : openingClose > openingOpen ? 1 : openingClose < openingOpen ? -1 : 0
+
+            // Filter D uses ONLY previous sessions: evaluate before inserting today.
+            int   histCount = openingVolHistory.size()
+            float histSum   = histCount > 0 ? openingVolHistory.sum() : na
+            bool  histReady = histCount == LOOKBACK and not na(histSum) and histSum > 0
+            sessOpeningRvol := sessHasOpening and histReady ? openingVolume / (histSum / LOOKBACK) : na
+
+            // Threshold tests. Filters B and D are cross-multiplied
+            // (sum >= mean_threshold * N) so integer share volumes compare
+            // exactly, without floating-point rounding at the boundary.
+            bool passPrice = sessHasOpening and openingOpen > MIN_OPEN_PRICE
+            bool passLiq   = not na(prevDailyVolSum) and prevDailyVolSum >= MIN_AVG_DAILY_VOL * LOOKBACK
+            bool passAtr   = not na(prevDailyAtr) and prevDailyAtr > MIN_DAILY_ATR
+            bool passRvol  = sessHasOpening and histReady and openingVolume * LOOKBACK >= MIN_OPEN_RVOL * histSum
+
+            // Freeze today's eligibility, direction and daily references.
+            sessPrevAtr    := prevDailyAtr
+            sessPrevAvgVol := na(prevDailyVolSum) ? na : prevDailyVolSum / LOOKBACK
+            sessEligible   := setupIsValid and sessHasOpening and sessDirection != 0 and passPrice and passLiq and passAtr and passRvol
+
+            // Roll the opening-volume history AFTER today's ratio was computed.
+            if volumeValid
+                openingVolHistory.push(openingVolume)
+                if openingVolHistory.size() > LOOKBACK
+                    openingVolHistory.shift()
+    else
+        // ---- Later bars of the same session: breakout detection -------------
+        bool inSignalWindow = nyMod >= WINDOW_START_MOD and nyMod < WINDOW_END_MOD
+        if sessEligible and not sessSignalLocked and inSignalWindow
+            if sessDirection == 1 and close > openingHigh
+                buySignal        := true
+                sessSignalLocked := true
+            else if sessDirection == -1 and close < openingLow
+                sellSignal       := true
+                sessSignalLocked := true
+
+// ==== END SIP-ORB SIGNAL ENGINE ====
+
+// =============================================================================
+// OUTPUT: the only visible chart elements are these two arrows.
+// =============================================================================
+plotshape(buySignal, title = "SIP-ORB BUY", style = shape.arrowup, location = location.belowbar, color = color.rgb(0, 200, 0), size = size.small, display = display.all - display.status_line)
+plotshape(sellSignal, title = "SIP-ORB SELL", style = shape.arrowdown, location = location.abovebar, color = color.rgb(220, 0, 0), size = size.small, display = display.all - display.status_line)
+
+// =============================================================================
+// ALERTS: use the "Once Per Bar Close" frequency.
+// {{close}} is the close of the confirmed triggering bar; {{time}} is its open
+// time in UTC.
+// =============================================================================
+alertcondition(buySignal, title = "SIP-ORB BUY", message = "SIP-ORB BUY | {{exchange}}:{{ticker}} | Timeframe {{interval}} | Signal close {{close}} | Bar open time {{time}} UTC")
+alertcondition(sellSignal, title = "SIP-ORB SELL", message = "SIP-ORB SELL | {{exchange}}:{{ticker}} | Timeframe {{interval}} | Signal close {{close}} | Bar open time {{time}} UTC")
+
+// =============================================================================
+// INVISIBLE DIAGNOSTICS: Data Window only, never drawn on the chart.
+// "Diag: signal" has the same name and meaning in the backtest strategy, so the
+// two scripts can be compared candle by candle.
+// =============================================================================
+plot(buySignal ? 1 : sellSignal ? -1 : 0, "Diag: signal (+1 BUY / -1 SELL)", display = display.data_window)
+plot(sessDirection, "Diag: permitted direction", display = display.data_window)
+plot(sessEligible ? 1 : 0, "Diag: session eligible (1/0)", display = display.data_window)
+plot(sessOpeningRvol, "Diag: opening RVOL", display = display.data_window)
+plot(openingVolHistory.size(), "Diag: opening-volume observations", display = display.data_window)
+plot(openingHigh, "Diag: opening high", display = display.data_window)
+plot(openingLow, "Diag: opening low", display = display.data_window)
+plot(sessPrevAtr, "Diag: previous daily ATR(14)", display = display.data_window)
+plot(sessPrevAvgVol, "Diag: previous 14-session mean daily volume", display = display.data_window)

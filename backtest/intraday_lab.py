@@ -63,6 +63,11 @@ def load_instrument(cache_dir: str | Path, ticker: str) -> dict:
         h5 = np.nanmax(h.reshape(sh), axis=2)
         l5 = np.nanmin(l.reshape(sh), axis=2)
     c5 = cf[:, 4::5]                                  # close at each bar end (forward-filled)
+    o5 = np.full((n, 78), np.nan)
+    for j in range(4, -1, -1):                        # first valid open in each 5-minute bar
+        col = o.reshape(sh)[:, :, j]
+        o5 = np.where(~np.isnan(col), col, o5)
+    v5 = v.reshape(sh).sum(axis=2)
     has5 = ~np.isnan(c.reshape(sh)).all(axis=2)
     day_open = o[:, 0]
     # VWAP and volume-weighted std-dev at each bar end
@@ -94,7 +99,10 @@ def load_instrument(cache_dir: str | Path, ticker: str) -> dict:
                 atr = float(np.mean(trs))
         else:
             atr = (atr * 13 + tr) / 14
+    prev_high = np.r_[np.nan, dh[:-1]]
+    prev_low = np.r_[np.nan, dl[:-1]]
     return {"ticker": ticker, "dkey": dkey, "o": o, "h": h, "l": l, "cf": cf, "c5": c5, "h5": h5, "l5": l5,
+            "o5": o5, "v5": v5, "prev_high": prev_high, "prev_low": prev_low,
             "has5": has5, "day_open": day_open, "prev_close": np.concatenate(pc)[order], "vwap5": vwap5,
             "vsd5": vsd5, "sig5": sig5, "atr_prev": atr_prev}
 
@@ -150,6 +158,49 @@ def signals(d: dict, family: str, p: float | tuple) -> np.ndarray:
         elif family == "gap_fade":
             gap = d["day_open"] / d["prev_close"] - 1
             sig[:, 0] = np.where(gap >= p, -1, np.where(gap <= -p, 1, 0))
+        elif family == "pd_sweep":                       # ICT liquidity sweep of prior-day high/low -> fade
+            ph, pl = d["prev_high"][:, None], d["prev_low"][:, None]
+            swept_up = np.maximum.accumulate(d["h5"] > ph, axis=1)
+            swept_dn = np.maximum.accumulate(d["l5"] < pl, axis=1)
+            sig[swept_up & (c5 < ph)] = -1
+            sig[swept_dn & (c5 > pl)] = 1
+        elif family == "pd_break":                       # close beyond prior-day high/low -> continuation
+            sig[c5 > d["prev_high"][:, None]] = 1
+            sig[c5 < d["prev_low"][:, None]] = -1
+        elif family in ("fvg", "fvg_sb"):                # ICT fair value gap: displacement gap, then retrace into it
+            o5, h5, l5 = d["o5"], d["h5"], d["l5"]
+            rng5 = h5 - l5
+            gdir = np.zeros(n); gtop = np.full(n, np.nan); gbot = np.full(n, np.nan)
+            lo_b, hi_b = (6, 18) if family == "fvg_sb" else (2, 78)    # 10:00-11:00 window for "silver bullet"
+            for b in range(2, 78):
+                in_win = lo_b <= b < hi_b
+                # entries: retrace into the most recent unfilled gap, closing back on its far side
+                long_e = (gdir > 0) & (l5[:, b] <= gtop) & (c5[:, b] >= gbot)
+                short_e = (gdir < 0) & (h5[:, b] >= gbot) & (c5[:, b] <= gtop)
+                if in_win:
+                    sig[long_e, b], sig[short_e, b] = 1, -1
+                gdir[long_e | short_e] = 0
+                # formation at bar b (displacement candle b-1 >= p x average range so far)
+                avg = np.nanmean(rng5[:, :b], axis=1)
+                disp = rng5[:, b - 1] >= p * avg
+                bull = disp & (l5[:, b] > h5[:, b - 2]) & (c5[:, b - 1] > o5[:, b - 1])
+                bear = disp & (h5[:, b] < l5[:, b - 2]) & (c5[:, b - 1] < o5[:, b - 1])
+                if in_win:
+                    gdir = np.where(bull, 1, np.where(bear, -1, gdir))
+                    gtop = np.where(bull, l5[:, b], np.where(bear, l5[:, b - 2], gtop))
+                    gbot = np.where(bull, h5[:, b - 2], np.where(bear, h5[:, b], gbot))
+        elif family == "delta_div":                      # order-flow proxy: new high/low without delta confirmation
+            h5, l5 = d["h5"], d["l5"]
+            rng5 = h5 - l5
+            clv = np.where(rng5 > 0, (2 * c5 - h5 - l5) / rng5, 0.0)
+            cd = np.cumsum(np.nan_to_num(d["v5"] * clv), axis=1)
+            cd_max, cd_min = np.maximum.accumulate(cd, axis=1), np.minimum.accumulate(cd, axis=1)
+            cd_rng = cd_max - cd_min
+            c_max = np.fmax.accumulate(c5, axis=1)
+            c_min = np.fmin.accumulate(c5, axis=1)
+            sig[(c5 >= c_max) & (cd < cd_max - p * cd_rng)] = -1
+            sig[(c5 <= c_min) & (cd > cd_min + p * cd_rng)] = 1
+            sig[:, :6] = 0
         elif family == "vwap_pullback":
             trend = np.sign(c5[:, 5] - d["day_open"])[:, None]   # direction at 10:00
             touch_long = (trend > 0) & (d["l5"] <= d["vwap5"])

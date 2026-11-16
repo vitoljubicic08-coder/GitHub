@@ -1,0 +1,32 @@
+Trades: 36450 on 1870 stocks | selection < 2025-04-01 <= test
+All stocks, test period: 15191 trades  win  13.3%  avg  -0.17R  total -2555.0R  PF  0.84
+
+TOP 5 CHOSEN ON THE SELECTION PERIOD (min 10 trades), then tested:
+  VKTX   selection:   41 trades  win  24.4%  avg  +2.70R  total  +110.9R  PF  3.99
+         test:        14 trades  win  14.3%  avg  -0.92R  total   -12.9R  PF  0.07
+  CDNS   selection:   33 trades  win  27.3%  avg  +2.19R  total   +72.4R  PF  3.90
+         test:        12 trades  win  16.7%  avg  -0.50R  total    -5.9R  PF  0.43
+  NVAX   selection:   27 trades  win  18.5%  avg  +1.94R  total   +52.4R  PF  2.70
+         test:         7 trades  win  14.3%  avg  -0.22R  total    -1.5R  PF  0.83
+  MSTR   selection:   27 trades  win  22.2%  avg  +1.81R  total   +48.8R  PF  3.13
+         test:        12 trades  win  16.7%  avg  +0.13R  total    +1.5R  PF  1.15
+  AKAM   selection:   26 trades  win  19.2%  avg  +1.87R  total   +48.7R  PF  2.96
+         test:        20 trades  win   5.0%  avg  -0.13R  total    -2.5R  PF  0.88
+  Combined test period of the 5 picks:   65 trades  win  12.3%  avg  -0.33R  total   -21.4R  PF  0.67
+
+TOP 5 OVER THE WHOLE PERIOD (min 10 trades; chosen with hindsight):
+  VKTX     55 trades  win  21.8%  avg  +1.78R  total   +98.0R  PF  2.92
+         2023:  +50.3R/15  2024:  +53.3R/23  2025:   -0.9R/13  2026:   -4.7R/4
+  TTWO     34 trades  win  26.5%  avg  +2.36R  total   +80.2R  PF  3.97
+         2023:   -6.6R/6  2024:  +18.6R/11  2025:  +35.2R/13  2026:  +33.0R/4
+  THC      28 trades  win  21.4%  avg  +2.83R  total   +79.2R  PF  4.29
+         2023:  +29.5R/12  2024:   +7.8R/11  2025:  +43.0R/4  2026:   -1.0R/1
+  BWA      45 trades  win  20.0%  avg  +1.73R  total   +77.7R  PF  2.64
+         2023:   -5.2R/9  2024:   -4.2R/17  2025:  +15.3R/10  2026:  +71.8R/9
+  CDNS     45 trades  win  24.4%  avg  +1.48R  total   +66.5R  PF  2.88
+         2023:  +63.5R/11  2024:   +0.0R/19  2025:   +0.9R/14  2026:   +2.0R/1
+
+Luck benchmark (trade results shuffled across stocks, 1000 runs):
+  rank:         #1        #2        #3        #4        #5      
+  actual top:     +98.0R    +80.2R    +79.2R    +77.7R    +66.5R
+  luck median:    +80.3R    +69.1R    +63.4R    +59.2R    +55.8R

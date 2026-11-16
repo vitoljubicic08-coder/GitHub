@@ -164,6 +164,41 @@ python3 backtest/sip_orb_backtest.py --data data --out backtest/results --min-tr
 python3 backtest/analyze_trades.py backtest/results/trades.csv
 ```
 
+## Multi-year backtest (3 years, public 1-minute data)
+
+`backtest/run_hf_backtest.py` replays the public Hugging Face dataset `Rrishab/OHLCV-1m` for
+2023-03 to 2026-03. That dataset holds 1-minute bars sourced by its author from Finnhub; its license
+was not verified.
+
+* **Data preparation:**
+  * The 1-minute bars are combined into regular-session 5-minute bars.
+  * Daily volume is the full-day sum, which matches Yahoo's official daily volume to within about 3%.
+  * The dataset is not split-adjusted, so prices and volumes are adjusted with Yahoo's split
+    history, the way TradingView adjusts its charts.
+* **Universe:** every current US common stock, 4,973 of which have data. Delisted stocks are
+  missing (survivorship bias).
+* **Result:** 36,450 trades on 1,870 stocks.
+  * Win rate 12.3%, average **−0.28R**, profit factor **0.75**.
+  * Bootstrap 95% CI of the mean: [−0.31R, −0.25R].
+  * Every year, and both longs and shorts, lost money.
+  * Before commission the average is −0.20R.
+* **Choosing stocks:** ranking stocks on 2023-03 → 2025-03 (at least 10 trades) gives VKTX, CDNS,
+  NVAX, MSTR and AKAM. In 2025-04 → 2026-03 these five lost: 65 trades, −0.33R average, profit
+  factor 0.67, which is worse than all stocks combined (−0.17R).
+  * Ranking all 765 stocks into quintiles on the first two years, even the best fifth averaged
+    −0.01R in the final year.
+* **Hindsight top 5 (VKTX, TTWO, THC, BWA, CDNS):** luck alone would produce a top 5 this good about
+  2.8% of the time, and each of these stocks had losing or flat years.
+
+Files: `backtest/results_3y/` (`summary.json`, `trades.csv.gz`, `top5.txt`, `breakdown.txt`).
+To reproduce:
+
+```bash
+pip install yfinance pandas pyarrow
+python3 backtest/run_hf_backtest.py --start 2023-03 --end 2026-03 --cache /tmp/hf --out results_hf
+python3 backtest/select_top_stocks.py results_hf/trades.csv --split 2025-04-01 --min-trades 10
+```
+
 ## Known limitations
 
 * **Not compiled here.** The scripts were reviewed against the v6 reference but not compiled in

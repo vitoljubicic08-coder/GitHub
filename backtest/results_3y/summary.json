@@ -1,0 +1,44 @@
+{
+  "trades": 36450,
+  "symbols_traded": 1870,
+  "symbols_simulated": 4973,
+  "first_entry": "2023-03-22T09:55:00-04:00",
+  "last_exit": "2026-03-31T15:55:00-04:00",
+  "win_rate_pct": 12.33196159122085,
+  "avg_r": -0.27866079575876157,
+  "median_r": -1.1767147289649142,
+  "best_r": 71.8159623598351,
+  "worst_r": -3.55025001675842,
+  "sum_r": -10157.186005406858,
+  "max_drawdown_r": -10541.95714121358,
+  "profit_factor": 0.7453164480443754,
+  "net_pnl_usd": -230522.5822,
+  "commission_usd": 64806.92,
+  "avg_net_pnl_usd": -6.324350677640604,
+  "avg_return_pct_of_equity": -0.06421564135911899,
+  "avg_entry_notional_pct": 73.78557655523886,
+  "entries_above_100pct_notional": 292,
+  "longest_losing_streak": 383,
+  "exit_reasons": {
+    "Stop": 30772,
+    "Stop (gap)": 1027,
+    "EOD 15:55": 4634,
+    "EOD failsafe": 17
+  },
+  "long": {
+    "trades": 18330,
+    "win_rate_pct": 11.816693944353519,
+    "avg_r": -0.3181771456885422,
+    "net_pnl": -131971.901
+  },
+  "short": {
+    "trades": 18120,
+    "win_rate_pct": 12.853200883002208,
+    "avg_r": -0.23868647488608608,
+    "net_pnl": -98550.6812
+  },
+  "accounts_profitable_pct": 9.672230042228032,
+  "avg_account_return_pct": -0.46354833052689787,
+  "trades_left_open_at_end_of_data": 0,
+  "data": "Rrishab/OHLCV-1m 2023-03..2026-03, split-adjusted with Yahoo splits"
+}

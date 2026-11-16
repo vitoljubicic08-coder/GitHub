@@ -151,7 +151,9 @@ class SipOrbEngine:
                             self.opening_vol_history.pop(0)
             else:
                 in_signal_window = WINDOW_START_MOD <= ny_mod < WINDOW_END_MOD
-                if self.sess_eligible and not self.sess_signal_locked and in_signal_window:
+                # `not _na(bar.close)` mirrors Pine, where a comparison with na is false.
+                if (self.sess_eligible and not self.sess_signal_locked and in_signal_window
+                        and not _na(bar.close)):
                     if self.sess_direction == 1 and bar.close > self.opening_high:
                         buy_signal = True
                         self.sess_signal_locked = True

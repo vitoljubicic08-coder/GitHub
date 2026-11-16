@@ -20,3 +20,17 @@ Committed BEFORE the development grid is run.
   2. the eligible combination with the highest win rate among those with reward:risk >= 1:1;
   3. the eligible combination with the highest win rate at reward:risk 1:3.
 * User target for reference: >= 70% win rate at about 1:3 (break-even at 1:3 is 25%).
+
+## Outcome (added after the holdout run)
+
+* Development grid: 0 of 10,755 combinations with at least 200 trades reached 70% at 1:3, none
+  reached 50% at 1:3, and none reached 70% at 1:1 or better. 248 were eligible, giving 12 finalists.
+* Holdout 2025-01 .. 2026-03 (`grid_holdout_finalists.csv`):
+  * The gap fades (SMH, AMZN) and META noise fade turned negative.
+  * META RSI weakened (+0.04R to +0.09R, negative in 2026).
+  * TSLA VWAP break was marginal (+0.04R).
+  * **QQQ noise-band breakout (1.5x band, 1:3) held up in all three versions:** +0.085R to +0.138R,
+    positive in both 2025 and 2026 Q1.
+* Yahoo Sep–Nov 2026: QQQ noise break with a 0.2 ATR stop gave +0.29R (1/day) and +0.23R (2/day);
+  the 0.1 ATR version gave +0.00R.
+* Implemented: **NB3 Breakout V1** = QQQ, 1.5x noise band, stop 0.2 x ATR, 1:3, 1 trade per day.

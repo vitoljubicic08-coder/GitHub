@@ -268,6 +268,62 @@ trade for trade, except on the few days around outages in the dataset: 2023-03-1
 2024-11-13/15, when QQQ was missing 54–76 of 78 bars. Results on 5-minute bars match the 1-minute
 results.
 
+## Round 2: arrow strategies with a fixed 1:3 (or other) reward:risk
+
+**Request:** an indicator with green and red arrows that is right 70% of the time at about 1:3.
+
+**The arithmetic:** at 1:3 the break-even win rate is 25%, and random entries hit +3R before -1R
+about 25% of the time. A 70% win rate at 1:3 would earn +1.8R per trade. The best strategies found
+here earn about 0.1-0.3R.
+
+**What was tested:** pre-registered in `backtest/SHORTLIST_2.md`, with every result in
+`backtest/grid_dev.csv`.
+* 18 instruments: SPY, QQQ, IWM, DIA, GLD, SLV, TLT, USO, XLE, XLF, SMH, AAPL, NVDA, TSLA, AMZN,
+  MSFT, META, AMD.
+* 24 signal settings: VWAP standard-deviation fade/break, noise-band fade/break, ORB, failed ORB,
+  RSI extremes, gap fade, VWAP pullback.
+* 3 stop sizes, 1-2 trades per day, and 5 reward:risk levels.
+* 12,960 combinations in total, with V1 costs.
+
+The engine (`backtest/intraday_lab.py`) was calibrated against random arrows, which match the
+theoretical 1/(1+RR).
+
+| Reward:risk | Random win rate | Best found (dev) | Median (dev) |
+|---|---|---|---|
+| 1:0.33 | 75% | 79% | 69% |
+| 1:0.5 | 67% | 71% | 62% |
+| 1:1 | 50% | 55% | 47% |
+| 1:2 | 33% | 50% | 35% |
+| 1:3 | 25% | 48% | 32% |
+
+* **No combination reached 70% at 1:3,** and none reached 50% at 1:3.
+* Of the 12 pre-registered finalists, only the **QQQ noise-band breakout at 1:3** held up on the locked
+  holdout and the independent Yahoo check.
+
+**NB3 Breakout V1:** QQQ, 1.5x noise band, stop 0.2 x ATR, 1:3, one trade per day.
+
+| Period | Win rate | Avg per trade |
+|---|---|---|
+| Development 2023-24 | 36.1% | +0.174R |
+| Holdout 2025-26 Q1 | 37.4% | +0.132R |
+| Yahoo Sep-Nov 2026 | 33.3% | +0.288R |
+
+With the strategy's sizing (risk 0.25% per trade, no leverage), $100 became $121.74 over
+2023-03 .. 2026-03:
+
+| Year | Return |
+|---|---|
+| 2023 | +4.0% |
+| 2024 | +10.1% |
+| 2025 | +3.8% |
+| 2026 Q1 | +2.4% |
+
+* The worst dip was -5.2%.
+* On the Yahoo check, $100 became $102.78.
+* Pine files: `nb3_breakout_v1_indicator.pine` and `nb3_breakout_v1_strategy.pine`.
+* `tests/nb3_reference_engine.py` reproduces the grid engine's entries exactly, except on 6 days just
+  after outages in the dataset.
+
 ## Known limitations
 
 * **Not compiled here.** The scripts were reviewed against the v6 reference but not compiled in

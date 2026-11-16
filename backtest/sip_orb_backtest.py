@@ -61,30 +61,51 @@ def mintick(price: float) -> float:
 # ----------------------------------------------------------------------------
 # Daily reference values: request.security("D", [ta.atr(14)[1], math.sum(volume, 14)[1]], lookahead_on)
 # ----------------------------------------------------------------------------
+class DailyAccumulator:
+    """Incremental ta.atr(14) (Wilder RMA seeded with an SMA) and math.sum(volume, 14).
+
+    After add(day N), `values` holds the reference values AS OF day N, i.e. what
+    request.security(..., [ta.atr(14)[1], math.sum(volume, 14)[1]], lookahead_on)
+    returns on every intraday bar of day N + 1.
+    """
+
+    def __init__(self) -> None:
+        self.tr_count = 0
+        self.tr_sum = 0.0
+        self.atr: float | None = None
+        self.prev_close: float | None = None
+        self.vols: list[float | None] = []
+        self.values: tuple[float | None, float | None] = (None, None)
+
+    def add(self, high: float, low: float, close: float, volume: float | None) -> None:
+        pc = self.prev_close
+        tr = high - low if pc is None else max(high - low, abs(high - pc), abs(low - pc))
+        if self.atr is None:
+            self.tr_count += 1
+            self.tr_sum += tr
+            if self.tr_count == LOOKBACK:
+                self.atr = self.tr_sum / LOOKBACK
+        else:
+            self.atr = (self.atr * (LOOKBACK - 1) + tr) / LOOKBACK
+        self.vols.append(volume)
+        if len(self.vols) > LOOKBACK:
+            self.vols.pop(0)
+        vol_sum = sum(self.vols) if len(self.vols) == LOOKBACK and None not in self.vols else None
+        self.values = (self.atr, vol_sum)
+        self.prev_close = close
+
+
 class DailyReference:
-    """ATR(14) (Wilder RMA seeded with an SMA, as ta.atr) and the 14-day volume sum."""
+    """Daily reference values for a whole daily history, looked up by intraday date."""
 
     def __init__(self, rows: list[tuple[date, float, float, float, float, float | None]]):
         self.dates: list[date] = []
         self.values: list[tuple[float | None, float | None]] = []
-        trs: list[float] = []
-        vols: list[float | None] = []
-        atr: float | None = None
-        prev_close: float | None = None
+        acc = DailyAccumulator()
         for d, _o, h, l, c, v in sorted(rows):
-            tr = h - l if prev_close is None else max(h - l, abs(h - prev_close), abs(l - prev_close))
-            trs.append(tr)
-            if atr is None:
-                if len(trs) == LOOKBACK:
-                    atr = sum(trs) / LOOKBACK
-            else:
-                atr = (atr * (LOOKBACK - 1) + tr) / LOOKBACK
-            vols.append(v)
-            window = vols[-LOOKBACK:]
-            vol_sum = sum(window) if len(window) == LOOKBACK and None not in window else None
+            acc.add(h, l, c, v)
             self.dates.append(d)
-            self.values.append((atr, vol_sum))
-            prev_close = c
+            self.values.append(acc.values)
 
     def previous(self, d: date) -> tuple[float | None, float | None]:
         """Values of the last COMPLETED daily bar strictly before date d."""
@@ -175,37 +196,31 @@ def _ny(t: datetime) -> tuple[date, int, bool]:
     return ny.date(), ny.hour * 60 + ny.minute, ny.weekday() <= 4
 
 
-def simulate_symbol(symbol: str, bars: list[RawBar], daily: DailyReference) -> tuple[list[Trade], float, int]:
-    """Run one independent account. Returns (closed trades, final equity, trades left open)."""
-    engine = SipOrbEngine()
-    equity = INITIAL_CAPITAL
-    pos: _Position | None = None
-    pending_entry: tuple | None = None
-    pending_close: str | None = None
-    trades: list[Trade] = []
+class SymbolSimulator:
+    """One independent account: signal engine + broker emulator, fed one bar at a time."""
 
-    info = []
-    for t, *_rest, is_market in bars:
-        d, mod, weekday = _ny(t)
-        info.append((d, mod, is_market and weekday and OPEN_MOD <= mod < SESSION_END_MOD))
-    # session.islastbar_regular: last regular bar of each New York date in the data.
-    last_regular = [False] * len(bars)
-    seen: set[date] = set()
-    for i in range(len(bars) - 1, -1, -1):
-        d, _mod, in_regular = info[i]
-        if in_regular and d not in seen:
-            last_regular[i] = True
-            seen.add(d)
+    def __init__(self, symbol: str) -> None:
+        self.symbol = symbol
+        self.engine = SipOrbEngine()
+        self.equity = INITIAL_CAPITAL
+        self.pos: _Position | None = None
+        self.pending_entry: tuple | None = None
+        self.pending_close: str | None = None
+        self.trades: list[Trade] = []
 
-    def close_position(when: datetime, raw_price: float, reason: str) -> None:
-        nonlocal equity, pos
+    def is_idle(self) -> bool:
+        """Flat with no pending orders."""
+        return self.pos is None and self.pending_entry is None and self.pending_close is None
+
+    def _close(self, when: datetime, raw_price: float, reason: str) -> None:
+        pos = self.pos
         fill = raw_price - pos.side * SLIPPAGE_TICKS * mintick(raw_price)
         gross = pos.side * (fill - pos.entry_price) * pos.qty
         commission = 2 * COMMISSION_PER_SHARE * pos.qty
         net = gross - commission
         planned = pos.qty * pos.stop_distance
-        trades.append(Trade(
-            symbol=symbol, side="LONG" if pos.side == 1 else "SHORT",
+        self.trades.append(Trade(
+            symbol=self.symbol, side="LONG" if pos.side == 1 else "SHORT",
             signal_bar_time=pos.signal_time.isoformat(), signal_close=pos.signal_close,
             entry_time=pos.entry_time.isoformat(), entry_price=round(pos.entry_price, 6),
             exit_time=when.isoformat(), exit_price=round(fill, 6), exit_reason=reason,
@@ -216,60 +231,84 @@ def simulate_symbol(symbol: str, bars: list[RawBar], daily: DailyReference) -> t
             return_pct=100.0 * net / pos.equity_before,
             entry_notional_pct=100.0 * pos.qty * pos.entry_price / pos.equity_before,
         ))
-        equity += net
-        pos = None
+        self.equity += net
+        self.pos = None
 
-    for i, (t, o, h, l, c, v, is_market) in enumerate(bars):
-        d, mod, in_regular = info[i]
+    def process(self, bar: RawBar, prev_atr: float | None, prev_vol_sum: float | None,
+                is_last_regular: bool) -> None:
+        t, o, h, l, c, v, is_market = bar
+        d, mod, weekday = _ny(t)
+        in_regular = is_market and weekday and OPEN_MOD <= mod < SESSION_END_MOD
         valid_ohlc = None not in (o, h, l, c)
 
         # 1) Orders submitted at the previous close execute at this bar's open.
         if valid_ohlc:
-            if pending_close is not None and pos is not None:
-                close_position(t, o, pending_close)
-            pending_close = None
-            if pending_entry is not None and pos is None:
-                side, qty, dist, sig_t, sig_c, eq_before, date_key = pending_entry
+            if self.pending_close is not None and self.pos is not None:
+                self._close(t, o, self.pending_close)
+            self.pending_close = None
+            if self.pending_entry is not None and self.pos is None:
+                side, qty, dist, sig_t, sig_c, eq_before, date_key = self.pending_entry
                 fill = o + side * SLIPPAGE_TICKS * mintick(o)
-                pos = _Position(side, qty, t, fill, fill - side * dist, dist, sig_t, sig_c, eq_before, date_key)
-            pending_entry = None
+                self.pos = _Position(side, qty, t, fill, fill - side * dist, dist, sig_t, sig_c, eq_before, date_key)
+            self.pending_entry = None
 
             # 2) Stop order inside the bar (gap through the stop fills at the open).
+            pos = self.pos
             if pos is not None:
                 if pos.side == 1:
                     if o <= pos.stop_price:
-                        close_position(t, o, "Stop (gap)")
+                        self._close(t, o, "Stop (gap)")
                     elif l <= pos.stop_price:
-                        close_position(t, pos.stop_price, "Stop")
+                        self._close(t, pos.stop_price, "Stop")
                 else:
                     if o >= pos.stop_price:
-                        close_position(t, o, "Stop (gap)")
+                        self._close(t, o, "Stop (gap)")
                     elif h >= pos.stop_price:
-                        close_position(t, pos.stop_price, "Stop")
+                        self._close(t, pos.stop_price, "Stop")
 
         # 3) Signal engine on the confirmed bar.
-        prev_atr, prev_vol_sum = daily.previous(d)
+        engine = self.engine
         buy, sell = engine.update(Bar(t, o, h, l, c, v, prev_atr, prev_vol_sum, is_market=is_market))
         if not valid_ohlc:
-            continue
+            return
 
         # 4) Strategy logic at the bar close (S3 exits, then S4 entries).
         bar_close_time = t + timedelta(minutes=BAR_MINUTES)
-        if pos is not None:
-            held_from_prior = pos.date_key != engine.sess_date_key
+        if self.pos is not None:
+            held_from_prior = self.pos.date_key != engine.sess_date_key
             is_eod_submit_bar = in_regular and EOD_SUBMIT_MOD <= mod < EOD_SUBMIT_MOD + BAR_MINUTES
             if is_eod_submit_bar and not held_from_prior:
-                pending_close = "EOD 15:55"
-            elif held_from_prior or not in_regular or mod >= EOD_SUBMIT_MOD + BAR_MINUTES or last_regular[i]:
-                close_position(bar_close_time, c, "EOD failsafe")
+                self.pending_close = "EOD 15:55"
+            elif held_from_prior or not in_regular or mod >= EOD_SUBMIT_MOD + BAR_MINUTES or is_last_regular:
+                self._close(bar_close_time, c, "EOD failsafe")
 
-        if (buy or sell) and pos is None:
-            qty = position_size(equity, engine.sess_prev_atr, c, mintick(c))
-            if equity > 0 and qty >= 1:
-                pending_entry = (1 if buy else -1, qty, engine.sess_prev_atr * STOP_ATR_FRACTION,
-                                 t, c, equity, engine.sess_date_key)
+        if (buy or sell) and self.pos is None:
+            qty = position_size(self.equity, engine.sess_prev_atr, c, mintick(c))
+            if self.equity > 0 and qty >= 1:
+                self.pending_entry = (1 if buy else -1, qty, engine.sess_prev_atr * STOP_ATR_FRACTION,
+                                      t, c, self.equity, engine.sess_date_key)
 
-    return trades, equity, 1 if pos is not None else 0
+
+def last_regular_flags(bars: list[RawBar]) -> list[bool]:
+    """session.islastbar_regular: the last regular bar of each New York date in the data."""
+    flags = [False] * len(bars)
+    seen: set[date] = set()
+    for i in range(len(bars) - 1, -1, -1):
+        t, *_rest, is_market = bars[i]
+        d, mod, weekday = _ny(t)
+        if is_market and weekday and OPEN_MOD <= mod < SESSION_END_MOD and d not in seen:
+            flags[i] = True
+            seen.add(d)
+    return flags
+
+
+def simulate_symbol(symbol: str, bars: list[RawBar], daily: DailyReference) -> tuple[list[Trade], float, int]:
+    """Run one independent account over a whole history. Returns (trades, final equity, trades left open)."""
+    sim = SymbolSimulator(symbol)
+    for bar, is_last in zip(bars, last_regular_flags(bars)):
+        prev_atr, prev_vol_sum = daily.previous(_ny(bar[0])[0])
+        sim.process(bar, prev_atr, prev_vol_sum, is_last)
+    return sim.trades, sim.equity, 0 if sim.pos is None else 1
 
 
 # ----------------------------------------------------------------------------

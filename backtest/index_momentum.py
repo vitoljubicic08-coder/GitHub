@@ -10,6 +10,8 @@ Rules, evaluated on 1-minute data from the candidate cache's market files:
   * Flat: close > upper -> long; close < lower -> short.
   * Long: exit when close < max(upper, VWAP); short: exit when close > min(lower, VWAP). After an exit,
     a new position in the other direction can open at the same check if price is beyond that bound.
+  * no_churn (default): when an exit and a same-direction re-entry would happen at the same check
+    (price beyond the band but on the wrong side of VWAP), the position is simply held, saving fees.
   * All positions close at the 15:55 open (the V1 strategy's end-of-day convention).
 Costs: 2 ticks of slippage per fill and 0.005 USD/share per side, on an unlevered position (1x notional).
 Returns are in percent of notional per trade and per day.
@@ -47,7 +49,7 @@ def _ffill(a: np.ndarray) -> np.ndarray:
 
 
 def run(cache_dir: str | Path, ticker: str, start: int, end: int, band_mult: float = 1.0,
-        use_vwap: bool = True) -> dict:
+        use_vwap: bool = True, take_profit: float | None = None, no_churn: bool = True) -> dict:
     dkey, grid, prev_close = load_market(cache_dir, ticker)
     n = len(dkey)
     opens = grid[:, 0, 0]
@@ -66,34 +68,46 @@ def run(cache_dir: str | Path, ticker: str, start: int, end: int, band_mult: flo
         vwap = np.cumsum(np.nan_to_num(typical) * vol) / np.maximum(np.cumsum(vol), 1e-9)
         c = close[i]
         o = _ffill(g[:, 0])
-        pos, entry, total = 0, 0.0, 0.0
+        pos, entry, total, ent_t = 0, 0.0, 0.0, 0
 
         def fill(px: float, side: int) -> float:
             return px + side * SLIP
 
-        for t in CHECKS:
+        hi_ = _ffill(g[:, 1]); lo_ = _ffill(g[:, 2])
+        prev_t = CHECKS[0]
+        for t in CHECKS + [EOD]:
+            if take_profit and pos != 0:               # limit target between decisions (no slippage)
+                tgt = entry * (1 + pos * take_profit)
+                for m in range(prev_t, t):
+                    if (pos == 1 and hi_[m] >= tgt) or (pos == -1 and lo_[m] <= tgt):
+                        r = (pos * (tgt - entry) - 2 * COMMISSION) / entry
+                        trades.append((dkey[i], pos, r, ent_t, m)); total += r; pos = 0
+                        break
+            prev_t = t
+            if t == EOD:
+                break
             px_dec, px_exec = c[t - 1], o[t]
             if pos == 1:
                 stop = max(upper[t - 1], vwap[t - 1]) if use_vwap else upper[t - 1]
-                if px_dec < stop:
+                if px_dec < stop and not (no_churn and px_dec > upper[t - 1]):   # hold instead of exit+re-buy
                     ex = fill(px_exec, -1)
                     r = (ex - entry - 2 * COMMISSION) / entry
-                    trades.append((dkey[i], 1, r)); total += r; pos = 0
+                    trades.append((dkey[i], 1, r, ent_t, t)); total += r; pos = 0
             elif pos == -1:
                 stop = min(lower[t - 1], vwap[t - 1]) if use_vwap else lower[t - 1]
-                if px_dec > stop:
+                if px_dec > stop and not (no_churn and px_dec < lower[t - 1]):   # hold instead of exit+re-sell
                     ex = fill(px_exec, 1)
                     r = (entry - ex - 2 * COMMISSION) / entry
-                    trades.append((dkey[i], -1, r)); total += r; pos = 0
+                    trades.append((dkey[i], -1, r, ent_t, t)); total += r; pos = 0
             if pos == 0:
                 if px_dec > upper[t - 1]:
-                    pos, entry = 1, fill(px_exec, 1)
+                    pos, entry, ent_t = 1, fill(px_exec, 1), t
                 elif px_dec < lower[t - 1]:
-                    pos, entry = -1, fill(px_exec, -1)
+                    pos, entry, ent_t = -1, fill(px_exec, -1), t
         if pos != 0:
             ex = fill(o[EOD], -pos)
             r = (pos * (ex - entry) - 2 * COMMISSION) / entry
-            trades.append((dkey[i], pos, r)); total += r
+            trades.append((dkey[i], pos, r, ent_t, EOD)); total += r
         day_ret.append(total); days.append(dkey[i])
     return {"trades": trades, "day_ret": np.array(day_ret), "days": np.array(days)}
 

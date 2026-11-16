@@ -199,6 +199,75 @@ python3 backtest/run_hf_backtest.py --start 2023-03 --end 2026-03 --cache /tmp/h
 python3 backtest/select_top_stocks.py results_hf/trades.csv --split 2025-04-01 --min-trades 10
 ```
 
+## Strategy research: fixing ORB and alternatives
+
+**Goal:** a strategy that is consistent across years with a high win rate. **Method:**
+* Develop only on 2023-03 → 2024-12.
+* Commit the finalists before looking at the locked holdout (2025-01 → 2026-03), see
+  `backtest/SHORTLIST.md`.
+* Then run one independent check on Yahoo data, Sep–Nov 2026.
+* Every variant is logged in `backtest/research_log.csv`: 63 runs on development data, plus the
+  holdout and Yahoo checks.
+
+Tools:
+* `build_candidate_cache.py`: one pass that stores the 1-minute path of every candidate stock-day.
+* `variant_lab.py`: a vectorised simulator. Replaying V1 at 5-minute resolution, it reproduced all
+  4,414 event-driven trades.
+* `index_momentum.py`: the SPY/QQQ momentum simulator.
+
+**Stock ORB fixes (all after V1 costs):**
+* **The paper's own setup is worst under V1 costs** (top-20 RVOL, stop-order entry, 10%-ATR stop):
+  −0.61R.
+* **Wider stops cut the cost drag most.** Stopping at the other side of the opening range gives
+  −0.02R and a 43% win rate.
+* **Filters did not help.**
+  * Gap direction, SPY direction, side, RVOL tiers and premarket volume made no difference.
+  * The premarket-volume filter peaked at a single threshold, a sign of noise.
+  * Price ≥ $50–100 and a minimum $ stop help only by cutting costs.
+* **Before costs** the edge is about +0.03–0.05R per trade. That is too small to survive 2 ticks of
+  slippage per fill.
+* **Finalist E04** (top-20 RVOL, stop entry, range stop, stop ≥ $2): +0.015R on development data,
+  **+0.001R on the holdout**, so no edge.
+* **Profit targets raise the win rate but not profits.** A 0.5R target gives a 61% win rate and
+  −0.025R.
+
+**SPY/QQQ intraday "noise-area" momentum** (Zarattini, Aziz & Barbon 2024, published defaults,
+untuned):
+
+| QQQ, unlevered, after costs | Result |
+|---|---|
+| 2023 (development) | +11.7% |
+| 2024 (development) | +7.4% |
+| 2025 (holdout) | +10.6% |
+| 2026 Q1 (holdout) | +1.9% |
+| Sep–Nov 2026 (Yahoo, independent) | +4.0% |
+
+* Sharpe: 1.77 on development, 0.96 on the holdout, 2.38 on the Yahoo check.
+* Positive months: 26 of 40.
+* Maximum drawdown: −6.8%.
+* Per-trade win rate: 38–42%.
+* SPY holdout: Sharpe 0.28, weak.
+* Exits use the "no churn" rule: hold instead of exit-and-rebuy at the same check. This only
+  removes fees; the positions are unchanged.
+
+**The win-rate trade-off, measured on QQQ development data:**
+
+| Target | Win rate | 2-year return |
+|---|---|---|
+| None | 42% | +18.5% |
+| 0.30% | 54% | +10.8% |
+| 0.15% | 67% | +3.3% |
+
+A tight target lifts the win rate but destroys most of the profit, so the final version has no
+target.
+
+**Pine scripts:** `nam_momentum_v1_indicator.pine` and `nam_momentum_v1_strategy.pine`. They are
+Pine v6 on 5-minute QQQ (or SPY) charts and share a byte-identical engine block.
+`tests/nam_reference_engine.py` mirrors that engine bar by bar. It reproduces the research simulator
+trade for trade, except on the few days around outages in the dataset: 2023-03-13/14 and
+2024-11-13/15, when QQQ was missing 54–76 of 78 bars. Results on 5-minute bars match the 1-minute
+results.
+
 ## Known limitations
 
 * **Not compiled here.** The scripts were reviewed against the v6 reference but not compiled in
@@ -236,3 +305,15 @@ python3 backtest/select_top_stocks.py results_hf/trades.csv --split 2025-04-01 -
   conditions are only true at bar close, so with "Once Per Bar Close" each alert fires exactly once.
 * **Diagnostics** use `display.data_window`. They are not drawn on the chart and do not show in the
   status line.
+
+### Additional limitations (research round 2 and NAM V1)
+
+* The Pine scripts (V1 and NAM V1) were not compiled in TradingView. Compile them in the Pine Editor
+  before using them.
+* **End-of-day edge case:** both strategies send the end-of-day close on the 15:50 bar for a fill
+  at the 15:55 open. If a stock has no 15:55 bar, the order fills at the next bar, possibly the
+  next morning. This happened in 2 of 4,414 V1 trades. It is practically impossible for QQQ/SPY.
+* **NAM V1 has no intraday stop order.** Losses between half-hour checks are not capped.
+* **The holdout was used once per finalist.** The no-churn change came afterwards, but it only
+  removes duplicate fees.
+* The 1-minute dataset has outages, and its universe has survivorship bias (current listings only).

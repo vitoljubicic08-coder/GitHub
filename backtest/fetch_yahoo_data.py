@@ -2,9 +2,8 @@
 """Download input data for backtest/sip_orb_backtest.py from Yahoo Finance.
 
 Requires:  pip install yfinance pandas
-NOTE: this script was written but NOT executed during development, because
-package installation and market-data downloads were blocked in that
-environment. Check its output before relying on it.
+Network access needed: www.nasdaqtrader.com and Yahoo Finance
+(query1/query2.finance.yahoo.com, fc.yahoo.com, guce.yahoo.com, consent.yahoo.com).
 
 Steps
   1. Universe: NASDAQ Trader symbol directories (every NASDAQ, NYSE and NYSE
@@ -38,8 +37,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-NASDAQ_LISTED = "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/nasdaqlisted.txt"
-OTHER_LISTED = "https://www.nasdaqtrader.com/dynamic/SymbolDirectory/otherlisted.txt"
+NASDAQ_LISTED = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+OTHER_LISTED = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
 OTHER_EXCHANGES = {"N", "A"}   # N = NYSE, A = NYSE American
 EXCLUDED_NAME = re.compile(
     r"\b(warrants?|units?|rights?|preferred|depositary|notes?|debentures?|fund|etn|subordinated)\b", re.I)
@@ -88,32 +87,53 @@ def prefilter(symbols: list[str], min_price: float, min_avg_volume: float, batch
     return keep
 
 
-def save_symbol(sym: str, out: Path) -> bool:
+def _symbol_frame(df, sym: str):
+    """One symbol's OHLCV rows from a yf.download(group_by="ticker") frame; None if empty."""
+    import pandas as pd
+
+    if isinstance(df.columns, pd.MultiIndex):
+        if sym not in df.columns.get_level_values(0):
+            return None
+        df = df[sym]
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(how="all")
+    return None if df.empty else df
+
+
+def save_batch(chunk: list[str], out: Path) -> int:
+    """Download 60 days of 5-minute bars and 1 year of daily bars for a batch of symbols.
+
+    Bars where Yahoo has no data at all are dropped, as TradingView would show no bar there.
+    """
     import pandas as pd
     import yfinance as yf
 
-    ticker = yf.Ticker(sym)
-    intraday = ticker.history(period="60d", interval="5m", prepost=False, auto_adjust=False)
-    daily = ticker.history(period="1y", interval="1d", auto_adjust=False)
-    if intraday.empty or daily.empty:
-        return False
+    intraday = yf.download(chunk, period="60d", interval="5m", prepost=False, group_by="ticker",
+                           auto_adjust=False, threads=True, progress=False)
+    daily = yf.download(chunk, period="1y", interval="1d", group_by="ticker",
+                        auto_adjust=False, threads=True, progress=False)
 
     def cell(x):
         return "" if pd.isna(x) else x
 
-    with (out / "intraday" / f"{sym}.csv").open("w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["time", "open", "high", "low", "close", "volume", "is_market"])
-        for ts, r in intraday.iterrows():
-            w.writerow([ts.isoformat(), cell(r["Open"]), cell(r["High"]), cell(r["Low"]),
-                        cell(r["Close"]), cell(r["Volume"]), 1])
-    with (out / "daily" / f"{sym}.csv").open("w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["date", "open", "high", "low", "close", "volume"])
-        for ts, r in daily.iterrows():
-            w.writerow([ts.date().isoformat(), cell(r["Open"]), cell(r["High"]), cell(r["Low"]),
-                        cell(r["Close"]), cell(r["Volume"])])
-    return True
+    saved = 0
+    for sym in chunk:
+        i_df, d_df = _symbol_frame(intraday, sym), _symbol_frame(daily, sym)
+        if i_df is None or d_df is None:
+            continue
+        with (out / "intraday" / f"{sym}.csv").open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["time", "open", "high", "low", "close", "volume", "is_market"])
+            for ts, r in i_df.iterrows():
+                w.writerow([ts.isoformat(), cell(r["Open"]), cell(r["High"]), cell(r["Low"]),
+                            cell(r["Close"]), cell(r["Volume"]), 1])
+        with (out / "daily" / f"{sym}.csv").open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["date", "open", "high", "low", "close", "volume"])
+            for ts, r in d_df.iterrows():
+                w.writerow([ts.date().isoformat(), cell(r["Open"]), cell(r["High"]), cell(r["Low"]),
+                            cell(r["Close"]), cell(r["Volume"])])
+        saved += 1
+    return saved
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,7 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-price", type=float, default=4.0)
     parser.add_argument("--min-avg-volume", type=float, default=500_000)
     parser.add_argument("--batch", type=int, default=200)
-    parser.add_argument("--sleep", type=float, default=0.3, help="pause between symbols (rate limiting)")
+    parser.add_argument("--download-batch", type=int, default=50, help="symbols per 5-minute/daily request")
+    parser.add_argument("--sleep", type=float, default=1.0, help="pause between batches (rate limiting)")
     args = parser.parse_args(argv)
 
     if args.symbols_file:
@@ -136,13 +157,14 @@ def main(argv: list[str] | None = None) -> int:
     (args.out / "intraday").mkdir(parents=True, exist_ok=True)
     (args.out / "daily").mkdir(parents=True, exist_ok=True)
     saved = 0
-    for n, sym in enumerate(symbols, 1):
+    for i in range(0, len(symbols), args.download_batch):
+        chunk = symbols[i:i + args.download_batch]
         try:
-            saved += save_symbol(sym, args.out)
-        except Exception as exc:  # one bad symbol must not stop the download
-            print(f"{sym}: skipped ({exc})", file=sys.stderr)
-        if n % 50 == 0:
-            print(f"downloaded {n}/{len(symbols)} (saved {saved})", file=sys.stderr)
+            saved += save_batch(chunk, args.out)
+        except Exception as exc:  # one failed batch must not stop the download
+            print(f"batch {chunk[0]}..{chunk[-1]} skipped ({exc})", file=sys.stderr)
+        print(f"downloaded {min(i + args.download_batch, len(symbols))}/{len(symbols)} (saved {saved})",
+              file=sys.stderr)
         time.sleep(args.sleep)
     print(f"saved {saved} symbols to {args.out}", file=sys.stderr)
     return 0

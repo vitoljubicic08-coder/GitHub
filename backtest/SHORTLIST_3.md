@@ -25,3 +25,26 @@ Committed BEFORE the round-3 development grid is run.
   2. Portfolio P2: the two highest-ranked eligible 1-trade-per-day combinations on two different
      instruments, traded together (at most 2 trades per day);
   3. reference: NB3 (QQQ noise_break 1.5, stop 0.2, 1/day, 1:3) scored the same way.
+
+## Outcome (added after the holdout run)
+
+* Development: 18,270 combinations, 791 eligible. **None reached a 50% one-month pass probability;
+  the best was 45%.**
+  * Best by family: noise_break 45%, vwap_break 42%, orb 42%, gap_fade 40%, delta_div 40%,
+    orb_fail 39%, vwap_fade 39%, fvg 37%, rsi 37%, pd_break 36%, noise_fade 35%, vwap_pullback 35%,
+    pd_sweep 34%.
+  * The ICT and order-flow ideas did not beat the existing momentum families.
+* Holdout (`grid3_holdout_finalists.csv`): every finalist kept a positive average R. One-month pass
+  probabilities were 34-52%.
+  * **Best: QQQ noise_break 1.0, stop 0.3, 1/day, 1:3 = 52%** (48% winners, +0.255R, profit factor
+    1.55).
+  * Portfolio P2 (QQQ 1:2 + TSLA 1:3, 1/day each): 52%.
+  * NB3 V1 reference: 36%.
+* Independent Yahoo Sep–Nov 2026, QQQ 1.0/0.3/1:3: 52% (+0.249R per trade, profit factor 1.52).
+  The same holdout days with the edge removed: 31%.
+* Exploratory, not pre-registered:
+  * QQQ 1:3 + TSLA 1:3 = 55% on the holdout;
+  * QQQ 1:3 + SPY vwap_break 1.0/0.2/1:3 (futures-tradable) = 52%.
+* Implemented as **NB3 Breakout V2** (`nb3_breakout_v2_*.pine`): band 1.0, stop 0.3 ATR, 1:3, one
+  signal per day, QQQ or TSLA.
+* The ~70% target was not reached. It needs roughly +0.35-0.40R per trade at 2 trades per day.

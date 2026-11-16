@@ -1,0 +1,176 @@
+//@version=6
+// =============================================================================
+// NB3 BREAKOUT V2 - BACKTESTING STRATEGY (QQQ / TSLA noise-band breakout, 1:3 bracket)
+// -----------------------------------------------------------------------------
+// The NB3 SIGNAL ENGINE block is byte-identical to the indicator. Rules and
+// research results: see the indicator header and docs/sip_orb_precision_v1.md.
+//
+// FIXED BACKTEST ASSUMPTIONS (same conventions as SIP-ORB V1)
+//   Initial capital ...... 10,000 USD (hypothetical)
+//   Risk per trade ....... 0.25% of equity, max notional 100% of equity
+//                          (no leverage; for QQQ the notional cap usually binds)
+//   Entry ................ market order at the confirmed signal close, filled at
+//                          the next bar's open
+//   Stop / target ........ 0.30 x previous daily ATR(14) from the actual fill /
+//                          3 x that distance (strategy.exit loss/profit in ticks)
+//   End of day ........... close submitted at the 15:50 bar (fills at the 15:55
+//                          open); failsafe closes anything left at once
+//   Commission ........... 0.005 USD per share, per side
+//   Slippage ............. 2 ticks per market/stop fill
+//
+// This is a research tool. Simulated results do not guarantee future results.
+// =============================================================================
+strategy("NB3 Breakout V2 [Backtest]", shorttitle = "NB3 V2 BT", overlay = true,
+     initial_capital = 10000, currency = currency.USD,
+     default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.005,
+     slippage = 2, margin_long = 100, margin_short = 100,
+     process_orders_on_close = false, calc_on_every_tick = false, calc_on_order_fills = false,
+     use_bar_magnifier = true, fill_orders_on_standard_ohlc = true)
+
+// ==== BEGIN NB3 SIGNAL ENGINE (must stay byte-identical in indicator and strategy) ====
+
+// -----------------------------------------------------------------------------
+// B1. Fixed parameters (selected by the pre-registered research; do not tune).
+// -----------------------------------------------------------------------------
+TZ              = "America/New_York"
+LOOKBACK        = 14     // sessions in the noise average and the daily ATR
+BARS_PER_DAY    = 78     // 5-minute bars from 09:30 to 15:55
+BAND_MULT       = 1.0    // band = open x (1 +/- 1.0 x sigma)
+STOP_ATR        = 0.30   // stop distance = 0.30 x previous daily ATR(14)
+REWARD_RISK     = 3.0    // target = 3 x stop distance
+OPEN_MOD        = 570    // 09:30
+SESSION_END_MOD = 960    // 16:00 (exclusive)
+LAST_SIGNAL_MOD = 890    // last signal bar opens 14:50 (entry fills at the 14:55 open)
+EOD_SUBMIT_MOD  = 950    // the 15:50 bar: flatten, filled at the 15:55 open
+
+// -----------------------------------------------------------------------------
+// B2. Chart and instrument validation.
+// -----------------------------------------------------------------------------
+bool chartIsFiveMinute = timeframe.isminutes and timeframe.multiplier == 5
+bool chartIsStandard   = chart.is_standard
+bool symbolIsSupported = (syminfo.ticker == "QQQ" or syminfo.ticker == "TSLA") and syminfo.currency == "USD"
+
+if not chartIsFiveMinute
+    runtime.error("NB3 V2 rejected: a 5-minute chart is required (current timeframe: " + timeframe.period + ").")
+if not chartIsStandard
+    runtime.error("NB3 V2 rejected: use a standard candlestick chart (not Heikin Ashi, Renko, Kagi, Point & Figure, Line Break or Range).")
+if not symbolIsSupported
+    runtime.error("NB3 V2 rejected: only QQQ (and TSLA) passed the out-of-sample tests (current symbol: " + syminfo.tickerid + ").")
+
+// -----------------------------------------------------------------------------
+// B3. Previous completed daily ATR(14) (no look-ahead).
+// -----------------------------------------------------------------------------
+string DAILY_TICKER = ticker.modify(syminfo.tickerid, session.regular)
+float prevDailyAtr = request.security(DAILY_TICKER, "D", ta.atr(LOOKBACK)[1], lookahead = barmerge.lookahead_on)
+
+// -----------------------------------------------------------------------------
+// B4. New York clock for the current bar (bar OPEN time).
+// -----------------------------------------------------------------------------
+int  nyMod       = hour(time, TZ) * 60 + minute(time, TZ)
+int  nyDow       = dayofweek(time, TZ)
+int  nyDateKey   = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+bool isWeekdayNY = nyDow >= dayofweek.monday and nyDow <= dayofweek.friday
+bool inRegular   = session.ismarket and isWeekdayNY and nyMod >= OPEN_MOD and nyMod < SESSION_END_MOD
+
+// -----------------------------------------------------------------------------
+// B5. State.
+// -----------------------------------------------------------------------------
+var matrix<float> moveHist  = matrix.new<float>()                   // one row per completed session
+var array<float>  todayMove = array.new<float>(BARS_PER_DAY, na)   // |close/open - 1| per bar today
+var int   sessDateKey = na
+var float dayOpen     = na
+var bool  tradedToday = false
+var float sessAtr     = na     // previous daily ATR, frozen for the session
+var float stopDist    = na     // stop distance of today's signal
+var float upperBand   = na
+var float lowerBand   = na
+
+bool buySignal  = false
+bool sellSignal = false
+
+// -----------------------------------------------------------------------------
+// B6. Engine: confirmed regular-session bars only.
+// -----------------------------------------------------------------------------
+if barstate.isconfirmed and inRegular
+    if na(sessDateKey) or nyDateKey != sessDateKey
+        if not na(sessDateKey) and not na(dayOpen)
+            moveHist.add_row(moveHist.rows(), todayMove.copy())
+            if moveHist.rows() > LOOKBACK
+                moveHist.remove_row(0)
+        sessDateKey := nyDateKey
+        dayOpen     := nyMod == OPEN_MOD ? open : na
+        todayMove   := array.new<float>(BARS_PER_DAY, na)
+        tradedToday := false
+        sessAtr     := prevDailyAtr
+        stopDist    := na
+        upperBand   := na
+        lowerBand   := na
+
+    int k = math.floor((nyMod - OPEN_MOD) / 5.0)
+    if not na(dayOpen)
+        todayMove.set(k, math.abs(close / dayOpen - 1))
+
+    if not tradedToday and nyMod <= LAST_SIGNAL_MOD and moveHist.rows() == LOOKBACK and not na(dayOpen) and not na(sessAtr) and sessAtr > 0
+        float sigmaSum   = 0.0
+        int   sigmaCount = 0
+        for r = 0 to LOOKBACK - 1
+            float x = moveHist.get(r, k)
+            if not na(x)
+                sigmaSum   += x
+                sigmaCount += 1
+        if sigmaCount > 0
+            float sigma = sigmaSum / sigmaCount
+            upperBand := dayOpen * (1 + BAND_MULT * sigma)
+            lowerBand := dayOpen * (1 - BAND_MULT * sigma)
+            stopDist  := STOP_ATR * sessAtr
+            if close > upperBand
+                buySignal   := true
+                tradedToday := true
+            else if close < lowerBand
+                sellSignal  := true
+                tradedToday := true
+
+// ==== END NB3 SIGNAL ENGINE ====
+
+// =============================================================================
+// S1. Orders.
+// =============================================================================
+RISK_FRACTION         = 0.0025
+MAX_NOTIONAL_FRACTION = 1.0
+SLIPPAGE_TICKS        = 2      // must equal strategy(slippage = 2)
+QTY_EPSILON           = 1e-9
+
+var int entryDateKey = na
+
+if barstate.isconfirmed
+    bool heldFromPriorSession = strategy.position_size != 0 and not na(entryDateKey) and entryDateKey != sessDateKey
+    if strategy.position_size != 0 and (heldFromPriorSession or not inRegular or session.islastbar_regular)
+        strategy.close_all(comment = "Failsafe", immediately = true)
+    else if strategy.position_size != 0 and nyMod == EOD_SUBMIT_MOD
+        strategy.close_all(comment = "EOD 15:55")
+
+    if (buySignal or sellSignal) and strategy.position_size == 0 and stopDist > 0
+        float equityNow    = strategy.equity
+        float referencePx  = close + SLIPPAGE_TICKS * syminfo.mintick
+        int   sharesByRisk = math.floor(equityNow * RISK_FRACTION / stopDist + QTY_EPSILON)
+        int   sharesByCap  = math.floor(equityNow * MAX_NOTIONAL_FRACTION / referencePx + QTY_EPSILON)
+        int   orderQty     = math.min(sharesByRisk, sharesByCap)
+        if orderQty >= 1
+            float stopTicks   = stopDist / syminfo.mintick
+            float targetTicks = REWARD_RISK * stopDist / syminfo.mintick
+            if buySignal
+                strategy.entry("Long", strategy.long, qty = orderQty, comment = "NB3 BUY")
+                strategy.exit("Long Bracket", from_entry = "Long", loss = stopTicks, profit = targetTicks, comment_loss = "Stop", comment_profit = "Target")
+            else
+                strategy.entry("Short", strategy.short, qty = orderQty, comment = "NB3 SELL")
+                strategy.exit("Short Bracket", from_entry = "Short", loss = stopTicks, profit = targetTicks, comment_loss = "Stop", comment_profit = "Target")
+            entryDateKey := sessDateKey
+
+// =============================================================================
+// OUTPUT: the same arrows as the indicator.
+// =============================================================================
+plotshape(buySignal, title = "NB3 BUY", style = shape.arrowup, location = location.belowbar, color = color.rgb(0, 200, 0), size = size.small, display = display.all - display.status_line)
+plotshape(sellSignal, title = "NB3 SELL", style = shape.arrowdown, location = location.abovebar, color = color.rgb(220, 0, 0), size = size.small, display = display.all - display.status_line)
+plot(buySignal ? 1 : sellSignal ? -1 : 0, "Diag: signal (+1 BUY / -1 SELL)", display = display.data_window)
+plot(stopDist, "Diag: stop distance", display = display.data_window)

@@ -324,6 +324,40 @@ With the strategy's sizing (risk 0.25% per trade, no leverage), $100 became $121
 * `tests/nb3_reference_engine.py` reproduces the grid engine's entries exactly, except on 6 days just
   after outages in the dataset.
 
+## Round 3: optimising for prop-firm evaluations (one-month pass probability)
+
+**Objective:** the chance of passing a $50K evaluation (+$3,000 before a $2,000 trailing drawdown)
+within one month, at up to 2 trades per day. The rule was pre-registered in
+`backtest/SHORTLIST_3.md`, and all results are in `backtest/grid3_dev.csv` and
+`backtest/grid3_holdout_finalists.csv`.
+
+**What 70% requires:** about +0.35-0.40R per trade at ~40 trades per month. For example, 65% winners
+at 1:1, 45% at 1:2, or 35% at 1:3, with full-size wins and losses.
+
+**New concepts tested:** ICT liquidity sweeps of the prior-day high/low, prior-day breaks, fair value
+gap retests (all day and the 10-11 "silver bullet" window), a cumulative-delta divergence order-flow
+proxy, and initial-balance break/failure. They were added to the 24 earlier settings across 18
+instruments, giving 18,270 combinations.
+* None of the new concepts beat the existing momentum signals.
+* The best one-month pass probability on development data was 45%.
+
+**Holdout:** QQQ noise_break, band 1.0, stop 0.3 ATR, 1:3, one trade per day.
+
+| Period | One-month pass probability |
+|---|---|
+| Development | 44% |
+| Holdout | 52% |
+| Yahoo Sep-Nov 2026 | 52% |
+| Holdout days with the edge removed | 31% |
+
+* Holdout trades: 48% winners, +0.255R, profit factor 1.55.
+* Two-instrument versions reached 52-55% on the holdout (QQQ + SPY is futures-tradable).
+* Implemented as `nb3_breakout_v2_indicator.pine` / `_strategy.pine`. The engine block is identical to
+  V1's apart from the settings and allowed symbols.
+* The bar-by-bar mirror selects the same entries as the grid engine, apart from a few days affected by
+  dataset outages and one half-day session (Nov 29, 2024) that TradingView would show without
+  afternoon bars.
+
 ## Known limitations
 
 * **Not compiled here.** The scripts were reviewed against the v6 reference but not compiled in

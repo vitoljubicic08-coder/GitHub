@@ -26,7 +26,9 @@ def _na(x) -> bool:
 
 
 class Nb3Engine:
-    def __init__(self) -> None:
+    def __init__(self, band_mult: float = BAND_MULT, stop_atr: float = STOP_ATR) -> None:
+        self.band_mult = band_mult      # V1: 1.5 / 0.20; V2: 1.0 / 0.30
+        self.stop_atr = stop_atr
         self.hist: list[list[float]] = []
         self.sess_date_key: int | None = None
         self.day_open = float("nan")
@@ -62,11 +64,11 @@ class Nb3Engine:
             col = [row[k] for row in self.hist if not _na(row[k])]
             if col:
                 sigma = sum(col) / len(col)
-                upper = self.day_open * (1 + BAND_MULT * sigma)
-                lower = self.day_open * (1 - BAND_MULT * sigma)
+                upper = self.day_open * (1 + self.band_mult * sigma)
+                lower = self.day_open * (1 - self.band_mult * sigma)
                 if c > upper:
                     buy, self.traded_today = True, True
                 elif c < lower:
                     sell, self.traded_today = True, True
-                self.stop_dist = STOP_ATR * self.sess_atr
+                self.stop_dist = self.stop_atr * self.sess_atr
         return buy, sell

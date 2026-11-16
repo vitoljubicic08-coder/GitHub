@@ -171,3 +171,47 @@ class Nb3PineSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Nb3V2Tests(unittest.TestCase):
+    """NB3 V2: same engine, band 1.0 x sigma and stop 0.30 x ATR, QQQ or TSLA."""
+
+    V2_IND = REPO / "nb3_breakout_v2_indicator.pine"
+    V2_STR = REPO / "nb3_breakout_v2_strategy.pine"
+
+    def test_v2_engine_identical_and_settings(self):
+        a, b = self.V2_IND.read_text(), self.V2_STR.read_text()
+        self.assertEqual(ENGINE_RE.findall(a), ENGINE_RE.findall(b))
+        engine = ENGINE_RE.findall(a)[0]
+        self.assertIn("BAND_MULT       = 1.0", engine)
+        self.assertIn("STOP_ATR        = 0.30", engine)
+        self.assertIn("REWARD_RISK     = 3.0", engine)
+        self.assertIn('(syminfo.ticker == "QQQ" or syminfo.ticker == "TSLA")', engine)
+        # identical to V1 apart from the settings, symbols and messages
+        v1 = ENGINE_RE.findall(INDICATOR.read_text())[0]
+        diff = [(x, y) for x, y in zip(v1.splitlines(), engine.splitlines()) if x != y]
+        self.assertEqual(len(v1.splitlines()), len(engine.splitlines()))
+        self.assertTrue(all(any(t in x for t in ("BAND_MULT", "STOP_ATR", "symbolIsSupported", "rejected"))
+                            for x, _ in diff), diff)
+
+    def test_v2_band_fires_where_v1_does_not(self):
+        start = date(2026, 6, 1)
+        for band, expected in ((1.5, []), (1.0, ["10:00"])):
+            with self.subTest(band=band):
+                eng = Nb3Engine(band_mult=band, stop_atr=0.30)
+                days = weekdays(start, 16)
+                for d in days[:15]:
+                    run_day(eng, d, {})                       # sigma = 0.001: V2 upper 100.10, V1 100.15
+                out = run_day(eng, days[15], {6: 100.12})
+                self.assertEqual(fired(out, 0), expected)
+        self.assertAlmostEqual(eng.stop_dist, 0.30 * ATR)
+
+    def test_v2_static_rules(self):
+        ind, strat = strip_comments(self.V2_IND.read_text()), strip_comments(self.V2_STR.read_text())
+        self.assertEqual(len(re.findall(r"\bplotshape\s*\(", ind)), 2)
+        self.assertNotRegex(ind + strat, r"\binput\s*[.(]|\boffset\s*=")
+        for code in (ind, strat):
+            calls = re.findall(r"request\.security\(.*\)", code)
+            self.assertEqual(len(calls), 1)
+            self.assertIn("ta.atr(LOOKBACK)[1]", calls[0])
+        self.assertEqual(len(re.findall(r"strategy\.exit\(.*loss = stopTicks, profit = targetTicks", strat)), 2)

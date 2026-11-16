@@ -1,0 +1,156 @@
+//@version=6
+// =============================================================================
+// NB3 BREAKOUT V2 - PRODUCTION INDICATOR (QQQ / TSLA noise-band breakout, 1:3)
+// -----------------------------------------------------------------------------
+// Same engine as NB3 V1, with the settings that scored best for passing
+// prop-firm evaluations (round 3, pre-registered, see backtest/SHORTLIST_3.md):
+//   band   = open x (1 +/- 1.0 x sigma[k])   (sigma: 14-session time-of-day noise)
+//   stop   = 0.30 x previous daily ATR(14) from the fill; target = 3 x stop
+//   first signal of the day only (bar open 09:30-14:50); flat by 15:55.
+//
+// RESEARCH RESULTS (offline; 2 ticks slippage + 0.005 USD/share per side)
+//   QQQ, one-month chance of passing a $50K evaluation (+$3,000 before a
+//   $2,000 trailing drawdown) at about $750 risk per trade:
+//     development 2023-24: 44% | locked holdout 2025-26Q1: 52% |
+//     independent Yahoo Sep-Nov 2026: 52% | same days with no edge: 31%
+//   Per trade (holdout): 48% winners, +0.255R, profit factor 1.55.
+//   QQQ + TSLA together (about 2 signals a day) passed 52-55% on the holdout.
+//   No tested combination reached a 70% one-month pass rate. Past results do
+//   not guarantee future results. For futures accounts, take the QQQ arrows
+//   and trade MNQ/NQ (untested on futures data directly).
+//
+// WHAT IS DRAWN: green arrow below bar = BUY, red arrow above bar = SELL.
+// ALERTS: "NB3 BUY" / "NB3 SELL" (Once Per Bar Close), plus an alert() call
+// with suggested stop/target prices ("Any alert() function call").
+// NON-REPAINTING: confirmed bars only; previous-day ATR via request.security
+// with [1] and lookahead_on.
+// =============================================================================
+indicator("NB3 Breakout V2", shorttitle = "NB3 V2", overlay = true)
+
+// ==== BEGIN NB3 SIGNAL ENGINE (must stay byte-identical in indicator and strategy) ====
+
+// -----------------------------------------------------------------------------
+// B1. Fixed parameters (selected by the pre-registered research; do not tune).
+// -----------------------------------------------------------------------------
+TZ              = "America/New_York"
+LOOKBACK        = 14     // sessions in the noise average and the daily ATR
+BARS_PER_DAY    = 78     // 5-minute bars from 09:30 to 15:55
+BAND_MULT       = 1.0    // band = open x (1 +/- 1.0 x sigma)
+STOP_ATR        = 0.30   // stop distance = 0.30 x previous daily ATR(14)
+REWARD_RISK     = 3.0    // target = 3 x stop distance
+OPEN_MOD        = 570    // 09:30
+SESSION_END_MOD = 960    // 16:00 (exclusive)
+LAST_SIGNAL_MOD = 890    // last signal bar opens 14:50 (entry fills at the 14:55 open)
+EOD_SUBMIT_MOD  = 950    // the 15:50 bar: flatten, filled at the 15:55 open
+
+// -----------------------------------------------------------------------------
+// B2. Chart and instrument validation.
+// -----------------------------------------------------------------------------
+bool chartIsFiveMinute = timeframe.isminutes and timeframe.multiplier == 5
+bool chartIsStandard   = chart.is_standard
+bool symbolIsSupported = (syminfo.ticker == "QQQ" or syminfo.ticker == "TSLA") and syminfo.currency == "USD"
+
+if not chartIsFiveMinute
+    runtime.error("NB3 V2 rejected: a 5-minute chart is required (current timeframe: " + timeframe.period + ").")
+if not chartIsStandard
+    runtime.error("NB3 V2 rejected: use a standard candlestick chart (not Heikin Ashi, Renko, Kagi, Point & Figure, Line Break or Range).")
+if not symbolIsSupported
+    runtime.error("NB3 V2 rejected: only QQQ (and TSLA) passed the out-of-sample tests (current symbol: " + syminfo.tickerid + ").")
+
+// -----------------------------------------------------------------------------
+// B3. Previous completed daily ATR(14) (no look-ahead).
+// -----------------------------------------------------------------------------
+string DAILY_TICKER = ticker.modify(syminfo.tickerid, session.regular)
+float prevDailyAtr = request.security(DAILY_TICKER, "D", ta.atr(LOOKBACK)[1], lookahead = barmerge.lookahead_on)
+
+// -----------------------------------------------------------------------------
+// B4. New York clock for the current bar (bar OPEN time).
+// -----------------------------------------------------------------------------
+int  nyMod       = hour(time, TZ) * 60 + minute(time, TZ)
+int  nyDow       = dayofweek(time, TZ)
+int  nyDateKey   = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+bool isWeekdayNY = nyDow >= dayofweek.monday and nyDow <= dayofweek.friday
+bool inRegular   = session.ismarket and isWeekdayNY and nyMod >= OPEN_MOD and nyMod < SESSION_END_MOD
+
+// -----------------------------------------------------------------------------
+// B5. State.
+// -----------------------------------------------------------------------------
+var matrix<float> moveHist  = matrix.new<float>()                   // one row per completed session
+var array<float>  todayMove = array.new<float>(BARS_PER_DAY, na)   // |close/open - 1| per bar today
+var int   sessDateKey = na
+var float dayOpen     = na
+var bool  tradedToday = false
+var float sessAtr     = na     // previous daily ATR, frozen for the session
+var float stopDist    = na     // stop distance of today's signal
+var float upperBand   = na
+var float lowerBand   = na
+
+bool buySignal  = false
+bool sellSignal = false
+
+// -----------------------------------------------------------------------------
+// B6. Engine: confirmed regular-session bars only.
+// -----------------------------------------------------------------------------
+if barstate.isconfirmed and inRegular
+    if na(sessDateKey) or nyDateKey != sessDateKey
+        if not na(sessDateKey) and not na(dayOpen)
+            moveHist.add_row(moveHist.rows(), todayMove.copy())
+            if moveHist.rows() > LOOKBACK
+                moveHist.remove_row(0)
+        sessDateKey := nyDateKey
+        dayOpen     := nyMod == OPEN_MOD ? open : na
+        todayMove   := array.new<float>(BARS_PER_DAY, na)
+        tradedToday := false
+        sessAtr     := prevDailyAtr
+        stopDist    := na
+        upperBand   := na
+        lowerBand   := na
+
+    int k = math.floor((nyMod - OPEN_MOD) / 5.0)
+    if not na(dayOpen)
+        todayMove.set(k, math.abs(close / dayOpen - 1))
+
+    if not tradedToday and nyMod <= LAST_SIGNAL_MOD and moveHist.rows() == LOOKBACK and not na(dayOpen) and not na(sessAtr) and sessAtr > 0
+        float sigmaSum   = 0.0
+        int   sigmaCount = 0
+        for r = 0 to LOOKBACK - 1
+            float x = moveHist.get(r, k)
+            if not na(x)
+                sigmaSum   += x
+                sigmaCount += 1
+        if sigmaCount > 0
+            float sigma = sigmaSum / sigmaCount
+            upperBand := dayOpen * (1 + BAND_MULT * sigma)
+            lowerBand := dayOpen * (1 - BAND_MULT * sigma)
+            stopDist  := STOP_ATR * sessAtr
+            if close > upperBand
+                buySignal   := true
+                tradedToday := true
+            else if close < lowerBand
+                sellSignal  := true
+                tradedToday := true
+
+// ==== END NB3 SIGNAL ENGINE ====
+
+// =============================================================================
+// OUTPUT: green arrow = BUY, red arrow = SELL. Nothing else is drawn.
+// =============================================================================
+plotshape(buySignal, title = "NB3 BUY", style = shape.arrowup, location = location.belowbar, color = color.rgb(0, 200, 0), size = size.small, display = display.all - display.status_line)
+plotshape(sellSignal, title = "NB3 SELL", style = shape.arrowdown, location = location.abovebar, color = color.rgb(220, 0, 0), size = size.small, display = display.all - display.status_line)
+
+alertcondition(buySignal, title = "NB3 BUY", message = "NB3 BUY | {{exchange}}:{{ticker}} | Timeframe {{interval}} | Signal close {{close}} | Bar open time {{time}} UTC")
+alertcondition(sellSignal, title = "NB3 SELL", message = "NB3 SELL | {{exchange}}:{{ticker}} | Timeframe {{interval}} | Signal close {{close}} | Bar open time {{time}} UTC")
+
+// Dynamic alert with suggested bracket levels (measured from the signal close;
+// re-anchor them to your actual fill).
+if buySignal
+    alert("NB3 BUY " + syminfo.ticker + " | signal close " + str.tostring(close, format.mintick) + " | stop ~" + str.tostring(close - stopDist, format.mintick) + " | target ~" + str.tostring(close + REWARD_RISK * stopDist, format.mintick) + " | exit by 15:55 ET", alert.freq_once_per_bar_close)
+if sellSignal
+    alert("NB3 SELL " + syminfo.ticker + " | signal close " + str.tostring(close, format.mintick) + " | stop ~" + str.tostring(close + stopDist, format.mintick) + " | target ~" + str.tostring(close - REWARD_RISK * stopDist, format.mintick) + " | exit by 15:55 ET", alert.freq_once_per_bar_close)
+
+// Invisible diagnostics (Data Window only).
+plot(buySignal ? 1 : sellSignal ? -1 : 0, "Diag: signal (+1 BUY / -1 SELL)", display = display.data_window)
+plot(upperBand, "Diag: upper band", display = display.data_window)
+plot(lowerBand, "Diag: lower band", display = display.data_window)
+plot(stopDist, "Diag: stop distance (0.30 x prev ATR)", display = display.data_window)
+plot(moveHist.rows(), "Diag: sessions in history", display = display.data_window)

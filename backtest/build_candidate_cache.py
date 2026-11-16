@@ -61,9 +61,10 @@ def _split_factor(tick: np.ndarray, dkey: np.ndarray, splits: dict) -> np.ndarra
     return factor
 
 
-def process_month(path: Path, tickers: list[str], splits: dict, states: dict[str, _State]):
+def process_month(path: Path, tickers: list[str], splits: dict, states: dict[str, _State],
+                  market: tuple[str, ...] = MARKET):
     table = pq.read_table(path, columns=["timestamp", "open", "high", "low", "close", "volume", "ticker"],
-                          filters=[("ticker", "in", tickers + list(MARKET))], read_dictionary=["ticker"])
+                          filters=[("ticker", "in", tickers + list(market))], read_dictionary=["ticker"])
     df = table.to_pandas()
     ny = df["timestamp"].dt.tz_convert(NY)
     df["dkey"] = (ny.dt.year * 10000 + ny.dt.month * 100 + ny.dt.day).astype(np.int64)
@@ -120,7 +121,7 @@ def process_month(path: Path, tickers: list[str], splits: dict, states: dict[str
         v5 = cols["v5"][i]
         has_open = v5 == v5 and v5 > 0 and cols["o5"][i] == cols["o5"][i]
 
-        if tk in MARKET:
+        if tk in market:
             mkt_tick.append(tk)
             mkt_dkey.append(dkey[i])
             mkt_grid.append(grid(i))
@@ -167,25 +168,33 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--end", required=True)
     ap.add_argument("--download", type=Path, required=True, help="folder for temporary Parquet downloads")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--market", default=",".join(MARKET), help="comma-separated tickers stored for every day")
+    ap.add_argument("--market-only", action="store_true", help="skip the stock candidates (fast)")
     args = ap.parse_args(argv)
+    market = tuple(t.strip().upper() for t in args.market.split(",") if t.strip())
     args.download.mkdir(parents=True, exist_ok=True)
     args.out.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
-    universe = load_universe()
-    tickers = sorted({s.replace("-", ".") for s in universe})
-    splits = load_splits(universe, args.start, args.download / "splits.json")
+    if args.market_only:
+        tickers = []
+        splits = load_splits([m.replace(".", "-") for m in market], args.start, args.out / "market_splits.json")
+    else:
+        universe = load_universe()
+        tickers = sorted({s.replace("-", ".") for s in universe})
+        splits = load_splits(universe, args.start, args.download / "splits.json")
     print(f"universe {len(tickers)} stocks, {len(splits)} with splits", flush=True)
     states: dict[str, _State] = {}
     for ym in months(args.start, args.end):
         src = args.download / f"ohlcv_{ym}.parquet"
         if not src.exists():
             download(DATASET_URL.format(ym=ym), src)
-        cand, market = process_month(src, tickers, splits, states)
-        np.savez(args.out / f"cand_{ym}.npz", **cand)
-        np.savez(args.out / f"market_{ym}.npz", **market)
+        cand, mkt = process_month(src, tickers, splits, states, market)
+        if not args.market_only:
+            np.savez(args.out / f"cand_{ym}.npz", **cand)
+        np.savez(args.out / f"market_{ym}.npz", **mkt)
         src.unlink()
-        print(f"{ym}: candidates {len(cand['tick']):>6,} | market days {len(market['tick']):>3} "
+        print(f"{ym}: candidates {len(cand['tick']):>6,} | market days {len(mkt['tick']):>3} "
               f"| {time.time() - t0:6.0f}s", flush=True)
     print("done", flush=True)
     return 0

@@ -57,3 +57,25 @@ budget, at most 3 MNQ.
 
 **What these figures are:** one historical path, not a promise. Two thirds of the net came in 2018, 2020
 and 2024-26; 2016-17 and 2019 lost money on accounts.
+
+## 4. Can several accounts at once make the first payout come sooner? (`ladder_lucid.py`)
+
+* **Rule check:** LucidFlex allows 10 evaluation and 5 funded accounts at once, and trade copiers are
+  permitted (help centre, 2026-11-17).
+* **Method:** programs started on every 5th trading day of 2016-01 .. 2025-03, each run for 12 months.
+* **Ladder K:** a new account every month until K are running; failed ones are replaced the next day.
+
+Today's volatility:
+
+| Program | Paid within 6 months | Paid within 12 months | Median months to the first payout | Fees | Net in 12 months, mean / median | Net per $1 of fees | Ahead |
+|---|---|---|---|---|---|---|---|
+| One at a time | 38% | 72% | 5.8 | $498 | +$722 / +$265 | 1.45 | 62% |
+| 2 at once | 39% | 73% | 5.6 | $964 | +$1,344 / +$510 | 1.39 | 61% |
+| 3 at once | 39% | 73% | 5.6 | $1,398 | +$1,847 / +$613 | 1.32 | 59% |
+| 5 at once | 40% | 74% | 5.6 | $2,169 | +$2,598 / +$920 | 1.20 | 58% |
+
+**Result: barely faster.**
+* Accounts started a month apart trade the same market, so they tend to pass and fail together.
+* Running more of them scales the money, both payouts and fees, roughly in proportion.
+* It does not bring the first payout much closer: the median goes from 5.8 to 5.6 months.
+* Historical volatility gives the same picture.

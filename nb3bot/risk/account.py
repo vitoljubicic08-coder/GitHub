@@ -27,13 +27,17 @@ class FirmRules:
     max_contracts: int
     profit_target: float | None = None  # evaluation target (None for funded accounts)
     consistency: float | None = None    # best day must be <= this share of total profit to pass
+    scaling: tuple = ()                 # funded scaling plan: ((profit_below, max_contracts), ...), by EOD profit
 
 
 PRESETS: dict[str, FirmRules] = {
     "topstep_combine_50k": FirmRules("Topstep 50K Trading Combine", 50000, 2000, "eod", 0.0, 1000, 50, 3000.0, 0.55),
     "topstep_xfa_50k": FirmRules("Topstep 50K Express Funded", 0, 2000, "eod", 0.0, 1000, 50),
     "lucid_flex_50k_eval": FirmRules("LucidFlex 50K evaluation", 50000, 2000, "eod", 100.0, None, 40, 3000.0, 0.40),
-    "lucid_flex_50k_funded": FirmRules("LucidFlex 50K funded", 50000, 2000, "eod", 100.0, None, 40),
+    # LucidFlex funded scaling plan (help centre, checked 2026-11-17): < $1,000 profit 20 micros,
+    # < $2,000 30 micros, then 40; updated at the end of each session
+    "lucid_flex_50k_funded": FirmRules("LucidFlex 50K funded", 50000, 2000, "eod", 100.0, None, 40,
+                                       scaling=((1000.0, 20), (2000.0, 30))),
     "tradeify_growth_50k_eval": FirmRules("Tradeify Growth 50K evaluation", 50000, 2000, "eod", None, 1250, 40, 3000.0, None),
     "tradeify_growth_50k_funded": FirmRules("Tradeify Growth 50K funded", 50000, 2000, "eod", 100.0, 1250, 40),
 }
@@ -50,6 +54,9 @@ class AccountState:
     unrealized: float = 0.0
     fixed_floor: float | None = None      # e.g. Topstep sets the floor to $0 after a payout
     best_day: float = 0.0                 # largest single-day profit (consistency rules)
+    cycle_win_days: int = 0               # payout cycle: days with at least the firm's minimum profit
+    cycle_profit: float = 0.0             # payout cycle: net profit since the last payout
+    payouts: int = 0
     history: list = field(default_factory=list)
 
 
@@ -93,8 +100,12 @@ class AccountTracker:
             self.s.hwm_intraday = max(self.s.hwm_intraday, self.s.balance)
             self._recompute_floor()
 
-    def end_of_day(self, new_week: bool = False) -> None:
-        self.s.best_day = max(self.s.best_day, self.s.balance - self.s.day_start_balance)
+    def end_of_day(self, new_week: bool = False, win_day: float | None = None) -> None:
+        day = self.s.balance - self.s.day_start_balance
+        self.s.best_day = max(self.s.best_day, day)
+        self.s.cycle_profit += day
+        if win_day is not None and day >= win_day:
+            self.s.cycle_win_days += 1
         self.s.hwm_eod = max(self.s.hwm_eod, self.s.balance)
         self._recompute_floor()
         self.s.history.append({"balance": self.s.balance, "floor": self.s.floor})
@@ -106,6 +117,8 @@ class AccountTracker:
     def payout(self, amount: float, floor_after: float | None) -> None:
         """Record a withdrawal; floor_after = firm rule (Topstep XFA: 0) or None (unchanged)."""
         self.s.balance -= amount
+        self.s.payouts += 1
+        self.s.cycle_win_days, self.s.cycle_profit = 0, 0.0
         if floor_after is not None:
             self.s.fixed_floor = floor_after
         self._recompute_floor()
@@ -118,6 +131,14 @@ class AccountTracker:
         return diff
 
     # ------------------------------------------------------------------ queries
+    def max_contracts_now(self) -> int:
+        """Firm contract limit today: the scaling plan uses the profit at the last end of day."""
+        profit = self.s.day_start_balance - self.r.starting_balance
+        for below, n in self.r.scaling:
+            if profit < below:
+                return min(int(n), self.r.max_contracts)
+        return self.r.max_contracts
+
     def evaluation_passed(self) -> bool:
         """Profit target reached and (if the firm has one) the consistency rule met."""
         t = self.r.profit_target
@@ -150,7 +171,9 @@ class AccountTracker:
     @classmethod
     def restore(cls, snap: dict) -> "AccountTracker":
         st = AccountState(**snap["state"])
-        return cls(FirmRules(**snap["rules"]), st)
+        rules = dict(snap["rules"])
+        rules["scaling"] = tuple(tuple(x) for x in rules.get("scaling", ()))
+        return cls(FirmRules(**rules), st)
 
 
 def rules_from_config(acc) -> FirmRules:

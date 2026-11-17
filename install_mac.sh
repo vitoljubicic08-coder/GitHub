@@ -61,9 +61,9 @@ if [[ "${NB3_SKIP_TESTS:-}" != "1" ]]; then
 fi
 
 # 5. launcher
-chmod +x start_demo.command install_mac.sh 2>/dev/null || true
+chmod +x start_demo.command start_lucid_steady.command install_mac.sh 2>/dev/null || true
 if command -v xattr >/dev/null 2>&1; then          # files from a downloaded ZIP are quarantined by macOS
-  xattr -d com.apple.quarantine start_demo.command install_mac.sh 2>/dev/null || true
+  xattr -d com.apple.quarantine start_demo.command start_lucid_steady.command install_mac.sh 2>/dev/null || true
 fi
 
 # 6. Alpaca keys -> macOS Keychain (only the launcher reads them, when it starts the bot)
@@ -89,4 +89,5 @@ fi
 
 say "Installation finished."
 echo "Start the demo:  double-click start_demo.command   (or in Terminal:  ./start_demo.command)"
+echo "Simulated LucidFlex 50K with the steady setting (1.5R, up to 2 trades a day):  double-click start_lucid_steady.command"
 echo "No Alpaca keys yet? start_demo.command offers the OFFLINE demo on synthetic prices."

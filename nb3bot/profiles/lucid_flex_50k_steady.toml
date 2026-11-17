@@ -1,0 +1,94 @@
+# Profile: lucid_flex_50k_steady  -  a SIMULATED LucidFlex 50K account, no money, no real orders.
+#
+# Strategy: NB3 V2's entry signal, unchanged, with the exits and payout policy that got the most simulated
+# Lucid accounts paid (research rounds 5 and 6, backtest/RESULTS_5.md and RESULTS_6.md):
+#   * target 1.5R instead of 3R (stop unchanged: 0.30 x previous daily ATR);
+#   * up to 2 trades a day: after the first trade closes, the next NB3 signal (a 5-minute close outside
+#     the band, entry after the exit minute, before 14:55) is taken;
+#   * $350 risk budget in both phases (1 MNQ at today's volatility, 2-3 on calm days, skipped if one MNQ
+#     risks more than $350);
+#   * payouts: request as soon as eligible, keeping at least $500 above the $50,100 loss limit (the bot
+#     tells you the amount; you request it on Lucid's site and then run record-payout).
+# Research results with today's volatility (one $130 account): paid within 12 months 41% if 2023-26 repeats,
+# 23% with half that edge; typical first payout about $730 gross. These are simulations, not promises.
+#
+# Data and fills: like the tradingview_50k_demo profile (Alpaca free QQQ bars, MNQ prices simulated as
+# QQQ x ratio, this program's paper broker). Nothing is sent to Lucid or any broker.
+# Account rules: LucidFlex 50K (help centre, checked 2026-11-17): $3,000 target, $2,000 loss limit trailing
+# the end-of-day high (breached in real time), locked at $50,100, best day <= 40% of profit, no daily loss
+# limit, 40 micros; funded scaling plan 20 / 30 / 40 micros below $1,000 / $2,000 profit / above.
+
+[bot]
+profile = "lucid_flex_50k_steady"
+banner = "SIMULATED LucidFlex 50K (steady setting: 1.5R, up to 2 trades a day). Every order is filled by this program's paper broker, NOT at Lucid. MNQ prices are simulated from QQQ."
+mode = "paper"
+state_dir = "state_lucid"
+log_dir = "logs_lucid"
+display_timezone = "Europe/Zagreb"
+loop_interval_seconds = 1.0
+
+[strategy]
+signal_source = "QQQ"
+early_close_policy = "skip"
+max_signal_delay_seconds = 45
+warmup_sessions = 250
+reward_risk = 1.5
+max_trades_per_day = 2
+
+[instrument]
+symbol = "MNQ"
+tick_size = 0.25
+tick_value = 0.50
+point_value = 2.0
+stop_conversion = "qqq_ratio"
+roll_days_before_expiry = 8
+
+[costs]
+commission_round_turn = 1.50       # Lucid's MNQ round turn as used in the research
+slippage_ticks_per_side = 1.0
+extra_stop_slippage_ticks = 4.0
+
+[risk]
+phase = "evaluation"               # switch to "funded" (and account.preset below) after passing
+evaluation_risk_per_trade = 350.0
+funded_risk_per_trade = 350.0
+max_contracts = 3                  # bot cap; the firm caps (40 / scaling plan) apply too
+max_daily_loss = 800.0             # two full losses a day are possible with 2 trades
+max_weekly_loss = 2000.0
+max_total_drawdown = 2000.0
+safety_reserve = 100.0
+halt_after_consecutive_losses = 0
+edge_stop_rules = true
+edge_min_mean_200 = 0.0            # this setting's expected mean is only about +0.07-0.10R per trade
+
+[account]
+preset = "lucid_flex_50k_eval"     # after passing: "lucid_flex_50k_funded" and a fresh state_lucid folder
+payout_rules = "lucid_flex_50k"
+payout_keep_above_floor = 500.0
+
+[broker]
+name = "paper"
+
+[data]
+qqq_provider = "alpaca"
+alpaca_api_base = "https://data.alpaca.markets"
+alpaca_key_id_env = "ALPACA_API_KEY_ID"
+alpaca_secret_env = "ALPACA_API_SECRET_KEY"
+alpaca_live_feed = "iex"
+alpaca_history_feed = "sip"
+mnq_provider = "synthetic"
+synthetic_ratio = 41.3
+allow_empty_minutes = true
+stale_after_seconds = 180
+bar_grace_seconds = 3.0
+max_bar_delay_seconds = 20.0
+eod_rebuild_delay_minutes = 20
+
+[authorization]
+practice_orders_enabled = false
+live_orders_enabled = false
+
+[dashboard]
+enabled = true
+host = "127.0.0.1"
+port = 8766

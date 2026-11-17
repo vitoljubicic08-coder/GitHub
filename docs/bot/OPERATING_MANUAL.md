@@ -19,6 +19,8 @@ When that happens (about 4 days in 5), the bot:
 
 It never trades more than once a day, never adds to a position and never moves the stop or target. The tested strategy does none of these things.
 
+**Exception:** the optional simulated LucidFlex profile (`lucid_flex_50k_steady`) uses a 1.5R target. It may also take a second trade after the first one has closed. See [LUCID_STEADY.md](LUCID_STEADY.md).
+
 **What it cannot promise:**
 
 - **Stops are not guaranteed prices.** In a fast market or a gap a stop can fill worse than planned. The research showed a stop filling at −2R and worse.

@@ -55,6 +55,8 @@ class TradeContext:
     halt_after_consecutive_losses: int
     edge_status: str                   # ok | pause | stop
     edge_detail: str
+    trades_today: int = 0
+    max_trades_per_day: int = 1
 
 
 def evaluate(c: TradeContext) -> Decision:
@@ -71,7 +73,9 @@ def evaluate(c: TradeContext) -> Decision:
         "early-close session: NB3 V2 defines no rule for it, the bot does not trade" if c.early_close else "full session")
     add("entry_window", c.within_entry_window, "signal bar opened 09:30-14:50 and market open")
     add("signal_fresh", 0 <= age <= c.max_signal_delay_s, f"{age:.1f}s after the 5-minute bar closed (max {c.max_signal_delay_s:.0f}s)")
-    add("one_trade_per_day", not c.traded_today, "already traded this session" if c.traded_today else "first trade today")
+    add("trades_per_day", not c.traded_today,
+        f"already {c.trades_today} trade(s) this session (limit {c.max_trades_per_day})" if c.traded_today
+        else f"trade {c.trades_today + 1} of at most {c.max_trades_per_day} today")
     add("market_data", c.data_ok, c.data_detail)
     add("broker", c.broker_ok, c.broker_detail)
     add("flat", c.flat_and_no_orders, "no open position and no working orders" if c.flat_and_no_orders else "position or orders already open")
@@ -103,15 +107,16 @@ def evaluate(c: TradeContext) -> Decision:
     return Decision(ok, ch)
 
 
-def edge_status(r_multiples: list[float]) -> tuple[str, str]:
+def edge_status(r_multiples: list[float], min_mean_200: float = 0.05) -> tuple[str, str]:
     """Pre-registered stop rules from the research report (per-trade R standard deviation ~1.42):
-    pause if mean < -0.13R after 50 trades; stop if mean < -0.04R after 100; stop if mean < +0.05R after 200."""
+    pause if mean < -0.13R after 50 trades; stop if mean < -0.04R after 100; stop if mean < +0.05R after 200
+    (`min_mean_200`; the Lucid steady profile uses 0, its expected mean is only about +0.07-0.10R)."""
     n = len(r_multiples)
     if n == 0:
         return "ok", "no live trades yet"
     m = sum(r_multiples) / n
-    if n >= 200 and m < 0.05:
-        return "stop", f"mean {m:+.3f}R after {n} trades is below +0.05R (200-trade rule)"
+    if n >= 200 and m < min_mean_200:
+        return "stop", f"mean {m:+.3f}R after {n} trades is below {min_mean_200:+.2f}R (200-trade rule)"
     if n >= 100 and m < -0.04:
         return "stop", f"mean {m:+.3f}R after {n} trades is below -0.04R (100-trade rule)"
     if n >= 50 and m < -0.13:

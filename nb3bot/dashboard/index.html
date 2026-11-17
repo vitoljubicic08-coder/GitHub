@@ -92,11 +92,17 @@ async function tick() {
   const a = s.account || {};
   kv($("account"), [["Rules", esc(a.rules)], ["Starting balance", money(s.starting_balance)], ["Balance", money(a.balance)], ["Equity", money(a.equity)],
     ["Loss-limit floor", money(a.floor)], ["Room to the floor", money(a.remaining_allowance), a.remaining_allowance < 700 ? "bad" : ""],
-    ["Today", money(a.day_pnl), a.day_pnl < 0 ? "bad" : "good"]]);
+    ["Today", money(a.day_pnl), a.day_pnl < 0 ? "bad" : "good"]]
+    .concat(s.strategy ? [["Strategy", "target " + esc(s.strategy.reward_risk) + "R, up to " + esc(s.strategy.max_trades_per_day) + " trade(s) a day"],
+                          ["Firm contract limit now", esc(s.strategy.firm_max_contracts_now)]] : [])
+    .concat(s.payout ? [["Payout", s.payout.eligible ? "ELIGIBLE: request " + money(s.payout.recommended) + " (≈ " + money(s.payout.to_you_after_split) + " to you)"
+                                                     : "not yet: " + esc(s.payout.reasons.join("; ")), s.payout.eligible ? "good" : ""],
+                        ["Payout cycle", esc(s.payout.cycle_win_days) + " win days, " + money(s.payout.cycle_profit) + "; payouts taken " + esc(s.payout.payouts_taken)]] : []));
   const sig = s.today_signal;
   kv($("today"), [["Session", esc(s.session)], ["Early close", s.early_close ? "yes (no trading)" : "no"],
     ["Contract", esc(s.contract)], ["Engine warm", s.engine_warm ? "yes" : "NO", s.engine_warm ? "good" : "bad"],
     ["Signal", sig ? (sig.direction > 0 ? "BUY" : "SELL") + " on bar " + sig.bar : "none yet"],
+    ["Signals today", esc((s.today_signals || []).map(x => (x.direction > 0 ? "BUY" : "SELL") + "@" + x.bar).join(", ") || "none")],
     ["Decision", s.today_decision ? (s.today_decision.allowed ? "traded" : "not traded") : "—", s.today_decision ? (s.today_decision.allowed ? "good" : "warn") : ""]]);
   const t = s.active_trade;
   kv($("trade"), t ? [["State", esc(t.state)], ["Side / size", (t.side > 0 ? "BUY " : "SELL ") + t.size], ["Fill", esc(t.fill_price)],

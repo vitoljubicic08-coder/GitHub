@@ -8,3 +8,6 @@ nb3bot.toml
 state_demo/
 logs_demo/
 nb3bot_demo.toml
+state_lucid/
+logs_lucid/
+nb3bot_lucid.toml

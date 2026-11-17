@@ -49,6 +49,13 @@ def replay_backtest(sessions: Iterable[Session], params: NB3V2Params = NB3V2Para
         eng.begin_session(s.key)
         pending: Signal | None = None
         br: BracketSim | None = None
+
+        def record(br: BracketSim, sig: Signal) -> None:
+            net, gross = br.r_multiple(commission)
+            r = br.result
+            trades.append(ReplayTrade(s.key, br.dir, sig.bar, br.ei, br.fill, br.dist, r.exit_minute,
+                                      r.exit_price, r.reason, net, gross, br.stop, br.target))
+
         for m in range(390):
             if pending is not None and br is None and pending.entry_minute <= m < params.eod_minute \
                     and not math.isnan(s.o[m]):
@@ -56,7 +63,10 @@ def replay_backtest(sessions: Iterable[Session], params: NB3V2Params = NB3V2Para
                                 params.reward_risk, slip)
                 pending_sig, pending = pending, None
             if br is not None and br.result is None and m < params.eod_minute:
-                br.on_minute(m, float(s.o[m]), float(s.h[m]), float(s.l[m]))
+                if br.on_minute(m, float(s.o[m]), float(s.h[m]), float(s.l[m])) is not None:
+                    record(br, pending_sig)              # closed intraday: a later bar may signal again
+                    eng.release(br.result.exit_minute)
+                    br = None
             if not (math.isnan(s.o[m]) and math.isnan(s.h[m]) and math.isnan(s.l[m]) and math.isnan(s.c[m])):
                 eng.on_minute(m, float(s.o[m]), float(s.h[m]), float(s.l[m]), float(s.c[m]))
             if m % 5 == 4:
@@ -66,9 +76,6 @@ def replay_backtest(sessions: Iterable[Session], params: NB3V2Params = NB3V2Para
                     pending = sig
         if br is not None:
             br.end_of_day(params.eod_minute, s.last_close_at_or_before(params.eod_minute - 1))
-            net, gross = br.r_multiple(commission)
-            r = br.result
-            trades.append(ReplayTrade(s.key, br.dir, pending_sig.bar, br.ei, br.fill, br.dist, r.exit_minute,
-                                      r.exit_price, r.reason, net, gross, br.stop, br.target))
+            record(br, pending_sig)
         eng.end_session()
     return trades, signals

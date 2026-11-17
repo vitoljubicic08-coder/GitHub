@@ -1,12 +1,13 @@
-"""Trade execution manager: one NB3 V2 trade per session, from signal to recorded result.
+"""Trade execution manager: one NB3 V2 trade at a time, from signal to recorded result.
 
 States: SUBMITTING -> WORKING (entry sent) -> PROTECTING (filled, checking stop/target) -> OPEN
         -> EXITING (15:55 flatten or emergency) -> closed and recorded.
         UNCERTAIN: the entry request got no reliable answer; the order is looked up by its unique tag
         (never resent).
 Safety rules enforced here:
-  * an intent is stored in the database BEFORE the order is sent; one intent per session, so no signal
-    can produce a second entry (retries, restarts, duplicate messages);
+  * an intent is stored in the database BEFORE the order is sent; one intent per trade key (the session,
+    or session x 10 + n for the n-th extra trade of the "steady" profile), so no signal can produce a
+    second entry (retries, restarts, duplicate messages);
   * every fill must be protected: the broker-side bracket is verified; if the stop is missing the bot
     places one; if that fails it closes the position;
   * at 15:55 New York the bot cancels the target, closes the position and cancels the stop, then checks
@@ -20,7 +21,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
 from nb3bot.broker.base import BracketEntry, Broker, BrokerError, BrokerUnavailable, UncertainOrderState
-from nb3bot.timeutil import NY
+from nb3bot.timeutil import NY, minute_start
 
 
 @dataclass
@@ -68,6 +69,7 @@ class TradeManager:
         snap = store.get("active_trade")
         self.active: ActiveTrade | None = ActiveTrade(**snap) if snap else None
         self.halt_reasons: list[str] = store.get("halt_reasons", [])
+        self.last_closed: dict | None = store.get("last_closed")   # {trade_key, day, exit_minute}
         self.last_reconcile_ok = True
         self.last_broker_error = ""
         # flatten at 15:55 plus the bar grace period, so the 15:54 bar is known (the backtest exits at its close)
@@ -91,12 +93,13 @@ class TradeManager:
     # ------------------------------------------------------------------ entry
     def submit(self, signal: dict, sizing, contract_id: str, tick_size: float, tick_value: float) -> bool:
         now = self.clock.now()
-        tag = f"NB3V2-{signal['session']}-{self.cfg.broker.account_id or 'paper'}"
-        t = ActiveTrade(tag, signal["session"], signal["direction"], sizing.contracts, sizing.stop_ticks,
+        key = signal.get("trade_key", signal["session"])
+        tag = f"NB3V2-{key}-{self.cfg.broker.account_id or 'paper'}"
+        t = ActiveTrade(tag, key, signal["direction"], sizing.contracts, sizing.stop_ticks,
                         sizing.target_ticks, tick_size, tick_value, contract_id, sizing.planned_loss, signal,
                         now.isoformat())
-        if not self.store.create_intent(tag, signal["session"], {"signal": signal, "sizing": sizing.to_dict()}):
-            self.audit.log("duplicate_signal_blocked", "WARN", session=signal["session"], tag=tag)
+        if not self.store.create_intent(tag, key, {"signal": signal, "sizing": sizing.to_dict()}):
+            self.audit.log("duplicate_signal_blocked", "WARN", session=key, tag=tag)
             return False
         self.active = t
         self._save()
@@ -330,6 +333,12 @@ class TradeManager:
                "contract": t.contract_id, "fill_price": t.fill_price, "fill_time": t.fill_time, "stop_price": t.stop_price,
                "target_price": t.target_price, "exit_price": exit_px, "exit_time": now.isoformat(), "exit_reason": reason,
                "gross_pnl": gross, "fees": fees, "planned_loss": t.planned_loss, "signal": t.signal, "notes": t.notes}
+        day = int(t.signal["session"])
+        last_fill = max((f.ts for f in closing), default=now)
+        exit_minute = int((last_fill - minute_start(day, 0)).total_seconds() // 60)
+        rec["exit_minute"] = exit_minute
+        self.last_closed = {"trade_key": t.session, "day": day, "exit_minute": exit_minute}
+        self.store.put("last_closed", self.last_closed)
         self.store.record_trade(t.session, t.tag, rec, pnl, r_mult)
         self.store.update_intent(t.tag, "closed", pnl=pnl)
         self.acc.realize(pnl)

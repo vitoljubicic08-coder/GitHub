@@ -30,6 +30,8 @@ class StrategyCfg:
     early_close_policy: str = "skip"      # NB3 V2 has no early-close rule; the bot does not trade those days
     max_signal_delay_seconds: float = 45  # entry must be sent within this long after the 5-minute bar closes
     warmup_sessions: int = 250            # sessions replayed at start-up for the noise band and ATR
+    reward_risk: float = 3.0              # NB3 V2: 3. Lucid "steady" profile (research round 5): 1.5
+    max_trades_per_day: int = 1           # NB3 V2: 1. Lucid "steady": 2 (next signal after the first closes)
 
 
 @dataclass
@@ -61,6 +63,7 @@ class RiskCfg:
     safety_reserve: float = 100.0         # must remain above the firm loss limit after the worst case
     halt_after_consecutive_losses: int = 0  # 0 = off (not part of the tested strategy)
     edge_stop_rules: bool = True          # pre-registered stop rules from the research report
+    edge_min_mean_200: float = 0.05       # 200-trade rule: stop if the mean R is below this (NB3 V2: +0.05R)
 
 
 @dataclass
@@ -72,6 +75,8 @@ class AccountCfg:
     lock_profit: float | None = 0.0       # floor stops trailing at starting balance + this (None = never)
     daily_loss_limit: float | None = 1000.0
     max_contracts_firm: int = 50
+    payout_rules: str = ""                # "" = not tracked | lucid_flex_50k (nb3bot/risk/payout.py)
+    payout_keep_above_floor: float = 500.0  # recommended request leaves at least this above the loss limit
 
 
 @dataclass
@@ -184,6 +189,12 @@ def validate(cfg: Config) -> list[str]:
         e.append("strategy.early_close_policy: only 'skip' is supported (NB3 V2 defines no early-close rule)")
     if cfg.risk.phase not in ("evaluation", "funded"):
         e.append("risk.phase must be evaluation or funded")
+    if not cfg.strategy.reward_risk > 0:
+        e.append("strategy.reward_risk must be positive")
+    if cfg.strategy.max_trades_per_day not in (1, 2):
+        e.append("strategy.max_trades_per_day must be 1 or 2 (the tested settings)")
+    if cfg.account.payout_rules not in ("", "lucid_flex_50k"):
+        e.append("account.payout_rules must be empty or lucid_flex_50k")
     if cfg.risk.max_contracts < 1:
         e.append("risk.max_contracts must be at least 1")
     for k in ("evaluation_risk_per_trade", "funded_risk_per_trade", "max_daily_loss", "max_weekly_loss",

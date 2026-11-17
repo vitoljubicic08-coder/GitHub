@@ -133,7 +133,7 @@ class GuardTests(unittest.TestCase):
         cases = {"armed": dict(entries_permitted=False), "no_halt": dict(halt_reasons=["x"]),
                  "trading_day": dict(trading_day=False), "not_early_close": dict(early_close=True),
                  "signal_fresh": dict(signal_bar_close=ctx().now - timedelta(seconds=90)),
-                 "one_trade_per_day": dict(traded_today=True), "market_data": dict(data_ok=False),
+                 "trades_per_day": dict(traded_today=True), "market_data": dict(data_ok=False),
                  "broker": dict(broker_ok=False), "flat": dict(flat_and_no_orders=False), "contract": dict(contract_ok=False),
                  "size": dict(sizing=SizingResult(0, 124, 496, 1488, 250.22, 0, 0, 250, "too big")),
                  "loss_limit_headroom": dict(account=acc), "edge_monitor": dict(edge_status="stop")}

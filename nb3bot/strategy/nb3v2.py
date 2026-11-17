@@ -24,6 +24,12 @@ run live, one completed 1-minute bar at a time. Every rule below is taken from t
   Daily ATR(14)        Wilder (RMA), seeded with the mean of the first 14 true ranges; daily
                        high/low/close from the regular-session 1-minute bars.
 There are no other filters (no regime, direction, volume or news filter) in NB3 V2.
+
+Optional second trade (Lucid "steady" profile, research round 5; default OFF = NB3 V2 exactly):
+  with max_trades_per_day = 2 the engine emits at most two signals a day. After a signal it is blocked
+  until `release(exit_minute)` is called (the trade closed, or the signal was not traded); then any
+  5-minute bar whose entry minute (b + 1) x 5 is after that exit minute and whose close is outside the
+  band is a signal again (backtest/lab4.py bracket with max_trades=2, "pass" signals).
 """
 from __future__ import annotations
 
@@ -78,7 +84,9 @@ class _Session:
     move: np.ndarray = field(default_factory=lambda: np.full(BARS, np.nan))
     last_close: float = math.nan       # forward-filled close
     next_bar: int = 0                  # next 5-minute bar to complete
-    fired: bool = False
+    fired: int = 0                     # signals emitted today
+    blocked: bool = False              # waiting for the last signal's trade to close
+    release_min: int = -1              # next signal needs (bar + 1) x 5 > this minute
 
 
 class NB3V2Engine:
@@ -127,7 +135,9 @@ class NB3V2Engine:
         day_open = s.o[0]
         with np.errstate(invalid="ignore", divide="ignore"):
             s.move[b] = abs(c5 / day_open - 1)
-        if s.fired or not has5 or len(self.hist) < self.p.noise_lookback:
+        if s.fired >= self.p.max_trades_per_day or s.blocked or not has5 or len(self.hist) < self.p.noise_lookback:
+            return None
+        if (b + 1) * 5 <= s.release_min:
             return None
         if (b + 1) * 5 >= self.p.last_entry_minute or math.isnan(s.atr_prev):
             return None
@@ -142,10 +152,21 @@ class NB3V2Engine:
             direction = -1
         else:
             return None
-        s.fired = True
+        s.fired += 1
+        s.blocked = True
         return Signal(session=s.key, bar=b, direction=direction, close=c5, day_open=float(day_open),
                       sigma=sigma, upper=upper, lower=lower, atr_prev=s.atr_prev,
                       stop_distance=self.p.stop_atr * s.atr_prev, entry_minute=(b + 1) * 5)
+
+    def release(self, exit_minute: int) -> None:
+        """The last signal's trade closed at `exit_minute` (or was not traded): later bars may signal again."""
+        s = self._need()
+        s.blocked = False
+        s.release_min = max(s.release_min, int(exit_minute))
+
+    @property
+    def waiting_for_release(self) -> bool:
+        return self.s is not None and self.s.blocked and self.s.fired < self.p.max_trades_per_day
 
     def end_session(self) -> None:
         s = self._need()

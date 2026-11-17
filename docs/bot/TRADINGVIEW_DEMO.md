@@ -117,6 +117,8 @@ Other firms differ (Lucid and Tradeify presets exist in `nb3bot/risk/account.py`
 
 You may also create a $50,000 TradingView Paper Trading account by hand to mirror trades yourself. The bot cannot place them there.
 
+**LucidFlex setting:** a second launcher, `start_lucid_steady.command`, runs the same kind of simulation with LucidFlex 50K rules. It uses the payout-optimized "steady" setting: a 1.5R target and up to 2 trades a day. See [LUCID_STEADY.md](LUCID_STEADY.md).
+
 ## 6. Limits of this demo (read before judging results)
 
 - **Data source:** live signals come from one exchange (IEX), not the consolidated data of the 675-trade validation. Use the agreement panel to see how often that changes the signal.

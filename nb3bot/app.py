@@ -26,6 +26,7 @@ from nb3bot.data.base import SessionFeed, check_feed, check_ratio, expected_last
 from nb3bot.execution.manager import TradeManager
 from nb3bot.risk.account import AccountTracker, rules_from_config
 from nb3bot.risk.guard import TradeContext, edge_status, evaluate
+from nb3bot.risk.payout import PAYOUT_PRESETS, advice as payout_advice
 from nb3bot.risk.sizing import convert_stop, size_trade
 from nb3bot.safety import KillSwitch, authorization_status
 from nb3bot.strategy.nb3v2 import NB3V2Engine, NB3V2Params
@@ -46,7 +47,10 @@ class Day:
     early_close: bool
     next_fetch: datetime
     incomplete_bars: set = field(default_factory=set)
-    signal: dict | None = None
+    signal: dict | None = None                 # the day's first signal (live vs final-data agreement)
+    signals: list = field(default_factory=list)
+    trade_keys: list = field(default_factory=list)
+    awaiting: dict | None = None               # last signal waiting for its trade to close (2-trade profile)
     decision: dict | None = None
     eod_done: bool = False
     data_errors: list = field(default_factory=list)
@@ -66,7 +70,8 @@ class Bot:
         snap = store.get("account")
         self.account = AccountTracker.restore(snap) if snap else AccountTracker(rules_from_config(cfg.account))
         self.mgr = TradeManager(broker, store, audit, alerter, self.account, cfg, clock)
-        self.params = NB3V2Params()
+        self.params = NB3V2Params(reward_risk=cfg.strategy.reward_risk,
+                                  max_trades_per_day=cfg.strategy.max_trades_per_day)
         self.engine: NB3V2Engine | None = None
         self.day: Day | None = None
         self.last_reconcile = datetime.min.replace(tzinfo=NY)
@@ -85,6 +90,7 @@ class Bot:
         snap = self.store.get("engine_snapshot")
         if snap:
             self.engine = NB3V2Engine.restore(snap["engine"])
+            self.engine.p = self.params            # trade settings follow the configuration
             self.audit.log("engine_restored", last_session=snap["last_session"], warm=self.engine.warm())
         if warmup_sessions is not None:
             self.engine = NB3V2Engine(self.params)
@@ -276,9 +282,32 @@ class Bot:
                 if not self.cfg.data.allow_empty_minutes or self._sig_stale(bar_end):
                     day.incomplete_bars.add(b)
                     self.audit.log("incomplete_bar", "WARN", bar=b, missing=len(missing))
+            if eng.waiting_for_release:
+                self._release_if_closed()
             sig = eng.complete_bar(b)
             if sig is not None:
                 self._on_signal(sig.to_dict(), bar_end, now, incomplete=b in day.incomplete_bars)
+
+    def _release_if_closed(self) -> None:
+        """2-trade profile: once the last signal's trade is closed, let later bars signal again (from the
+        minute after its exit, as in the research). A signal that was not traded releases at its entry minute."""
+        day = self.day
+        if day.awaiting is None:
+            return
+        if self.mgr.active is not None:
+            self.mgr.tick()                          # pick up a fill that happened in this bar's minutes
+            if self.mgr.active is not None:
+                return
+        lc = self.mgr.last_closed
+        if day.awaiting.get("skipped"):
+            m = day.awaiting["entry_minute"]
+        elif lc and lc.get("trade_key") == day.awaiting["trade_key"]:
+            m = lc["exit_minute"]
+        else:
+            return
+        self.engine.release(m)
+        self.audit.log("next_signal_allowed", after_minute=m, trades_today=len(day.trade_keys))
+        day.awaiting = None
 
     def _sig_stale(self, at: datetime) -> bool:
         """Single-exchange feeds: stale if the newest signal bar is older than stale_after_seconds at `at`."""
@@ -300,20 +329,26 @@ class Bot:
     # ------------------------------------------------------------------ signals
     def _on_signal(self, sig: dict, bar_end: datetime, now: datetime, incomplete: bool) -> None:
         day = self.day
-        day.signal = sig
+        seq = len(day.signals)
+        sig["trade_key"] = day.key if seq == 0 else day.key * 10 + seq
+        if seq == 0:
+            day.signal = sig
+        day.signals.append(sig)
+        day.trade_keys.append(sig["trade_key"])
+        day.awaiting = {"trade_key": sig["trade_key"], "entry_minute": sig["entry_minute"], "skipped": False}
         side = "BUY" if sig["direction"] > 0 else "SELL"
-        self.store.record_signal(sig)
+        self.store.record_signal({**sig, "session": sig["trade_key"], "day": day.key})
         self.audit.log("signal", side=side, session=sig["session"], bar=sig["bar"], close=sig["close"],
                        upper=sig["upper"], lower=sig["lower"], stop_distance=sig["stop_distance"], time=fmt_dual(bar_end))
         self.alert.send(f"NB3 V2 {side} signal on the {(bar_end - timedelta(minutes=5)).astimezone(NY):%H:%M} bar "
-                        f"({fmt_dual(bar_end)})", "INFO", key=f"sig-{sig['session']}")
+                        f"({fmt_dual(bar_end)})", "INFO", key=f"sig-{sig['trade_key']}")
         m_last = 5 * sig["bar"] + 4
         exec_px = day.exe.last_close(m_last)
         sig_px = sig["close"]
         method = self.cfg.instrument.stop_conversion
         stop_pts = convert_stop(sig["stop_distance"], method, sig_px, exec_px)
         tick, tv = (day.contract.tick_size, day.contract.tick_value) if day.contract else (self.cfg.instrument.tick_size, self.cfg.instrument.tick_value)
-        firm_max = self.account.r.max_contracts
+        firm_max = self.account.max_contracts_now()
         sizing = size_trade(stop_pts, self.cfg.risk_budget, tick_size=tick, tick_value=tv,
                             commission_rt=self.cfg.costs.commission_round_turn,
                             slip_ticks_per_side=self.cfg.costs.slippage_ticks_per_side,
@@ -353,7 +388,8 @@ class Bot:
         if not self.mgr.last_reconcile_ok:
             broker_ok, broker_detail = False, f"last reconciliation failed: {self.mgr.last_broker_error or 'state mismatch'}"
         rs = [t["r_multiple"] for t in self.store.trades() if t.get("r_multiple") is not None]
-        es, ed = edge_status(rs) if self.cfg.risk.edge_stop_rules else ("ok", "edge rules off")
+        es, ed = edge_status(rs, self.cfg.risk.edge_min_mean_200) if self.cfg.risk.edge_stop_rules else ("ok", "edge rules off")
+        done_today = sum(self.store.traded_session(k) for k in day.trade_keys[:-1])
         losses = 0
         for t in self.store.trades():
             if (t.get("pnl") or 0) < 0:
@@ -370,13 +406,14 @@ class Bot:
                            within_entry_window=sig["entry_minute"] < self.params.last_entry_minute,
                            data_ok=not problems, data_detail="; ".join(problems) or "QQQ and MNQ data complete and consistent",
                            broker_ok=broker_ok, broker_detail=broker_detail, flat_and_no_orders=flat,
-                           traded_today=self.store.traded_session(day.key), contract_ok=day.contract_ok,
+                           traded_today=done_today >= self.params.max_trades_per_day, contract_ok=day.contract_ok,
                            contract_detail=day.contract_detail, sizing=sizing, account=self.account,
                            max_trade_risk=self.cfg.risk_budget, max_daily_loss=self.cfg.risk.max_daily_loss,
                            max_weekly_loss=self.cfg.risk.max_weekly_loss, max_total_drawdown=self.cfg.risk.max_total_drawdown,
                            safety_reserve=self.cfg.risk.safety_reserve, consecutive_losses=losses,
                            halt_after_consecutive_losses=self.cfg.risk.halt_after_consecutive_losses,
-                           edge_status=es, edge_detail=ed)
+                           edge_status=es, edge_detail=ed, trades_today=done_today,
+                           max_trades_per_day=self.params.max_trades_per_day)
         dec = evaluate(ctx)
         day.decision = {**dec.to_dict(), "sizing": sizing.to_dict(), "exec_price": exec_px, "stop_points": stop_pts}
         self.audit.log("risk_decision", "INFO" if dec.allowed else "WARN", allowed=dec.allowed,
@@ -392,12 +429,14 @@ class Bot:
                 self.mgr.halt(f"{why}: entries stopped until you decide (reset the account, or adjust limits) "
                               f"and run clear-halts")
         if not dec.allowed:
-            tag = f"SKIP-{sig['session']}"
-            if self.store.create_intent(tag, sig["session"], {"signal": sig, "reasons": dec.reasons}):
+            tag = f"SKIP-{sig['trade_key']}"
+            if self.store.create_intent(tag, sig["trade_key"], {"signal": sig, "reasons": dec.reasons}):
                 self.store.update_intent(tag, "skipped")
-            self.alert.send(f"{side} signal NOT traded: " + "; ".join(dec.reasons), "INFO", key=f"skip-{sig['session']}")
+            self.alert.send(f"{side} signal NOT traded: " + "; ".join(dec.reasons), "INFO", key=f"skip-{sig['trade_key']}")
+            day.awaiting["skipped"] = True
             return
-        self.mgr.submit(sig, sizing, day.contract.id, tick, tv)
+        if not self.mgr.submit(sig, sizing, day.contract.id, tick, tv):
+            day.awaiting["skipped"] = True
 
     # ------------------------------------------------------------------ end of day
     def _end_day(self, now: datetime) -> None:
@@ -418,8 +457,16 @@ class Bot:
         self.engine = eng2
         self.store.put("engine_snapshot", {"engine": self.engine.snapshot(), "last_session": day.key})
         nxt = self.cal.next_trading_day(key_date(day.key))
-        self.account.end_of_day(new_week=nxt.isocalendar()[1] != key_date(day.key).isocalendar()[1])
+        pr = PAYOUT_PRESETS.get(self.cfg.account.payout_rules)
+        self.account.end_of_day(new_week=nxt.isocalendar()[1] != key_date(day.key).isocalendar()[1],
+                                win_day=pr.win_day if pr else None)
         self.store.put("account", self.account.snapshot())
+        if pr and self.cfg.risk.phase == "funded":
+            adv = payout_advice(self.account, pr, self.cfg.account.payout_keep_above_floor)
+            if adv["eligible"]:
+                self.alert.send(f"Payout eligible on {pr.name}: request ${adv['recommended']:,.0f} on the firm's site "
+                                f"(about ${adv['to_you_after_split']:,.0f} to you), then run record-payout",
+                                "INFO", key=f"payout-{self.account.s.payouts}")
         if self.cfg.risk.phase == "evaluation" and self.account.evaluation_passed():
             self.mgr.halt(f"evaluation target reached (balance ${self.account.s.balance:,.2f}, best day "
                           f"${self.account.s.best_day:,.2f}): the firm should now move you to the funded account. "
@@ -466,8 +513,15 @@ class Bot:
         trades = self.store.trades(500)
         rs = [x["r_multiple"] for x in trades if x.get("r_multiple") is not None]
         pnl = [x["pnl"] for x in trades if x.get("pnl") is not None]
-        es, ed = edge_status(rs)
+        es, ed = edge_status(rs, self.cfg.risk.edge_min_mean_200)
+        pr = PAYOUT_PRESETS.get(self.cfg.account.payout_rules)
+        steady = self.params.max_trades_per_day > 1 or self.params.reward_risk != 3.0
         st = {
+            "strategy": {"reward_risk": self.params.reward_risk, "max_trades_per_day": self.params.max_trades_per_day,
+                         "firm_max_contracts_now": self.account.max_contracts_now()},
+            "payout": (payout_advice(self.account, pr, self.cfg.account.payout_keep_above_floor)
+                       if pr and self.cfg.risk.phase == "funded" else None),
+            "today_signals": day.signals if day else [],
             "profile": self.cfg.bot.profile, "banner": self.cfg.bot.banner,
             "data_sources": {"signal": getattr(self.sig_src, "name", "?"), "execution_prices": getattr(self.exe_src, "name", "?"),
                              "notes": list(getattr(self.sig_src, "notes", []))[-3:]},
@@ -495,7 +549,9 @@ class Bot:
             "performance": {"trades": len(rs), "mean_r": round(sum(rs) / len(rs), 3) if rs else None,
                             "win_rate": round(sum(r > 0 for r in rs) / len(rs), 3) if rs else None,
                             "total_pnl": round(sum(pnl), 2), "edge_status": es, "edge_detail": ed,
-                            "backtest_reference": "holdout +0.255R/trade, 48% winners, ~0.86 trades/day"},
+                            "backtest_reference": ("research 2023-26: +0.09R/trade, ~1.45 trades/day (1.5R, up to 2/day); "
+                                                   "2016-22: +0.07R" if steady else
+                                                   "holdout +0.255R/trade, 48% winners, ~0.86 trades/day")},
             "recent_trades": trades[:20], "alerts": self.alert.sent[-15:],
         }
         with self.status_lock:

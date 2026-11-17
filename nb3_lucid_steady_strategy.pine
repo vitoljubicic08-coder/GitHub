@@ -38,6 +38,7 @@ GA = "Lucid account"
 phaseIn       = input.string("Evaluation", "Phase", options = ["Evaluation", "Funded"], group = GA)
 stopAtPass    = input.bool(true, "Evaluation: stop trading once passed", group = GA)
 simPayouts    = input.bool(true, "Funded: simulate payouts when eligible", group = GA)
+applyAccount  = input.bool(true, "Apply LucidFlex account rules", group = GA, tooltip = "Off = research mode: every signal is traded (only the risk budget sizing applies), so the strategy's raw results can be compared with the Python research.")
 GR = "Risk"
 riskBudget    = input.float(350.0, "Risk budget per trade ($)", minval = 50, group = GR)
 maxContracts  = input.int(3, "Max MNQ contracts per trade", minval = 1, maxval = 40, group = GR)
@@ -129,7 +130,7 @@ float equityNow = strategy.equity - withdrawn
 
 // End-of-day bookkeeping, done on the first bar of the next session (the account is flat by then).
 if barstate.isconfirmed and inRegular and (na(acctDay) or nyDateKey != acctDay)
-    if not na(acctDay) and not blown
+    if applyAccount and not na(acctDay) and not blown
         float dayPnl = equityNow - dayStartE
         float profit = equityNow - START_BAL
         eodHigh := math.max(eodHigh, equityNow)
@@ -239,16 +240,16 @@ else if strategy.position_size < 0
 float equityWorst = strategy.equity - strategy.openprofit + openWorst - withdrawn
 
 if barstate.isconfirmed
-    if not blown and equityWorst <= floorBal
+    if applyAccount and not blown and equityWorst <= floorBal
         blown := true
         strategy.close_all(comment = "Loss limit", immediately = true)
         label.new(bar_index, low, "LOSS LIMIT HIT: account failed", style = label.style_label_up, color = color.red, textcolor = color.white)
-    if inRegular and not dayLocked and equityWorst - dayStartE <= -dailyLoss
+    if applyAccount and inRegular and not dayLocked and equityWorst - dayStartE <= -dailyLoss
         dayLocked  := true
         lockReason := "daily loss limit"
         if strategy.position_size != 0
             strategy.close_all(comment = "Daily loss", immediately = true)
-    if inRegular and not dayLocked and dailyProfit > 0 and equityNow - dayStartE >= dailyProfit
+    if applyAccount and inRegular and not dayLocked and dailyProfit > 0 and equityNow - dayStartE >= dailyProfit
         dayLocked  := true
         lockReason := "daily profit cap"
         if flattenAtCap and strategy.position_size != 0
@@ -270,14 +271,16 @@ if barstate.isconfirmed and (buySignal or sellSignal) and strategy.position_size
     float worst = contracts * (rpc + GAP_ALLOW)
     float gain  = contracts * (rewardRisk * stopDist * usdPerQqq - COMM_RT - slipUsd)
     float today = equityNow - dayStartE
-    if blown
+    if contracts < 1
+        skipWhy := "one MNQ risks $" + str.tostring(rpc, "#") + " > budget"
+    else if not applyAccount
+        skipWhy := ""
+    else if blown
         skipWhy := "account failed"
     else if isEval and passed and stopAtPass
         skipWhy := "evaluation passed"
     else if dayLocked
         skipWhy := lockReason
-    else if contracts < 1
-        skipWhy := "one MNQ risks $" + str.tostring(rpc, "#") + " > budget"
     else if today - worst < -dailyLoss
         skipWhy := "would exceed the daily loss limit"
     else if equityNow - worst - SAFETY < floorBal
@@ -321,7 +324,7 @@ if barstate.islast
     float profitNow = equityNow - START_BAL
     float payAmt    = math.min(math.min(PAY_FRAC * profitNow, PAY_CAP), equityNow - (START_BAL + LOCK) - PAY_KEEP)
     bool  payOk     = not isEval and winDays >= WIN_DAYS and cycleProfit > 0 and payAmt >= PAY_MIN and payouts < MAX_PAYOUTS
-    string status   = blown ? "FAILED (loss limit)" : isEval ? (passed ? "PASSED" : "in evaluation") : "funded"
+    string status   = not applyAccount ? "account rules OFF (research mode)" : blown ? "FAILED (loss limit)" : isEval ? (passed ? "PASSED" : "in evaluation") : "funded"
     table.cell(info, 0, 0, "LucidFlex 50K", text_color = color.white)
     table.cell(info, 1, 0, phaseIn + ": " + status, text_color = blown ? color.red : color.white)
     table.cell(info, 0, 1, "Balance", text_color = color.white)

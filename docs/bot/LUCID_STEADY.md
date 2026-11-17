@@ -71,5 +71,20 @@ These are simulations of past data, not promises.
      .venv/bin/python -m nb3bot record-payout --config nb3bot_lucid.toml --amount 750 --floor-after 50100
      ```
 
-The TradingView NB3 V2 indicator still shows the same entry signals; it does not show the 1.5R target or
-the second trade.
+## TradingView version
+
+**File:** `nb3_lucid_steady_strategy.pine` (Pine Script v5) shows the same setting on a QQQ 5-minute chart.
+It has:
+* the NB3 signal;
+* the 1.5R target and the second trade;
+* MNQ-sized trades (the Strategy Tester trades the equivalent QQQ shares);
+* the daily limits and LucidFlex account tracking (loss limit, evaluation pass, payouts);
+* alerts for trading by hand.
+
+**To add it:** in the Pine Editor, create a new script (or open your NB3 V2 strategy), select all, paste the
+file, save, then **Add to chart**.
+
+**Notes:**
+* It was syntax-checked with a Pine parser (`pynescript`) but not compiled in TradingView here.
+* TradingView's fills and 5-minute account checks are approximations of the bot's minute-by-minute model.
+* TradingView's terms do not allow its alerts or data to drive automated trading.

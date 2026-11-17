@@ -1,0 +1,346 @@
+//@version=5
+// =============================================================================
+// NB3 LUCID STEADY - NB3 V2 signal with the LucidFlex 50K "steady" settings
+// -----------------------------------------------------------------------------
+// Same entry signal as NB3 Breakout V2 (QQQ, 5-minute chart): a 5-minute close outside the noise
+// band  open x (1 +/- sigma), sigma = 14-session average of |close/open - 1| at that time of day.
+// Changes (research rounds 5-6, backtest/RESULTS_5.md and RESULTS_6.md; the Python bot's
+// lucid_flex_50k_steady profile):
+//   * target 1.5R instead of 3R (stop unchanged: 0.30 x previous daily ATR(14))
+//   * up to 2 trades a day: after the first trade has closed, the next band signal is taken
+//   * size in MNQ contracts: floor($ risk budget / one MNQ's risk); the Strategy Tester trades
+//     QQQ shares equal to the MNQ exposure (1 MNQ = NQ/QQQ ratio x $2 = ~82.6 QQQ shares)
+//   * daily loss limit (incl. the open trade), optional daily profit cap, evaluation best-day cap
+//   * LucidFlex 50K account: $2,000 end-of-day trailing loss limit locked at $50,100, $3,000 target,
+//     best day <= 40% of profit, funded scaling plan, payouts (5 days >= $150, 50% up to $2,000,
+//     min $500, keep $500 above the limit), max 5 payouts
+//
+// Costs: $1.50 per MNQ round turn (cash per share-equivalent), 1 QQQ tick ($0.01 ~ 1.65 MNQ ticks)
+// of slippage per market/stop fill. Bar Magnifier (1-minute fills) is used if your plan has it.
+//
+// LIMITS: TradingView's fills are not the research's minute-by-minute model, account checks run on
+// 5-minute bars, and the account rules are a simulation. TradingView's terms do not allow using its
+// data or alerts to drive automated trading: use the alerts to trade by hand, or the Python bot.
+// Simulated results do not guarantee future results.
+// =============================================================================
+strategy("NB3 Lucid Steady [Backtest]", shorttitle = "NB3 Lucid", overlay = true,
+     initial_capital = 50000, currency = currency.USD,
+     default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.0091,
+     slippage = 1, margin_long = 0, margin_short = 0,
+     process_orders_on_close = false, calc_on_every_tick = false, calc_on_order_fills = false,
+     use_bar_magnifier = true, fill_orders_on_standard_ohlc = true, max_labels_count = 500)
+
+// -----------------------------------------------------------------------------
+// Inputs
+// -----------------------------------------------------------------------------
+GA = "Lucid account"
+phaseIn       = input.string("Evaluation", "Phase", options = ["Evaluation", "Funded"], group = GA)
+stopAtPass    = input.bool(true, "Evaluation: stop trading once passed", group = GA)
+simPayouts    = input.bool(true, "Funded: simulate payouts when eligible", group = GA)
+GR = "Risk"
+riskBudget    = input.float(350.0, "Risk budget per trade ($)", minval = 50, group = GR)
+maxContracts  = input.int(3, "Max MNQ contracts per trade", minval = 1, maxval = 40, group = GR)
+dailyLoss     = input.float(800.0, "Daily loss limit ($, incl. open trade)", minval = 100, group = GR)
+dailyProfit   = input.float(0.0, "Daily profit cap ($, 0 = off)", minval = 0, group = GR)
+flattenAtCap  = input.bool(false, "Close the open trade at the daily profit cap", group = GR)
+bestDayCapOn  = input.bool(true, "Evaluation: keep each day under 40% x $3,000", group = GR)
+nqRatio       = input.float(41.3, "NQ / QQQ price ratio", minval = 30, maxval = 50, group = GR)
+GS = "Strategy"
+rewardRisk    = input.float(1.5, "Target (R)", minval = 0.5, maxval = 5, step = 0.5, group = GS, tooltip = "1.5 = Lucid steady. 3.0 = NB3 V2.")
+maxTrades     = input.int(2, "Trades per day", minval = 1, maxval = 2, group = GS, tooltip = "2 = Lucid steady. 1 = NB3 V2.")
+
+// -----------------------------------------------------------------------------
+// Fixed parameters (research; do not tune)
+// -----------------------------------------------------------------------------
+TZ              = "America/New_York"
+LOOKBACK        = 14
+BARS_PER_DAY    = 78
+BAND_MULT       = 1.0
+STOP_ATR        = 0.30
+OPEN_MOD        = 570      // 09:30
+SESSION_END_MOD = 960      // 16:00
+LAST_SIGNAL_MOD = 890      // last signal bar opens 14:50
+EOD_SUBMIT_MOD  = 950      // 15:50 bar: close, filled at the 15:55 open
+
+START_BAL   = 50000.0
+MLL         = 2000.0
+LOCK        = 100.0        // limit locks at $50,100
+TARGET_PNL  = 3000.0
+CONSISTENCY = 0.40
+WIN_DAY     = 150.0
+WIN_DAYS    = 5
+PAY_FRAC    = 0.5
+PAY_CAP     = 2000.0
+PAY_MIN     = 500.0
+PAY_KEEP    = 500.0
+MAX_PAYOUTS = 5
+MAX_MICROS  = 40
+COMM_RT     = 1.50
+GAP_ALLOW   = 2.0          // extra $ per contract in the worst case (4 MNQ ticks)
+SAFETY      = 100.0
+
+bool  isEval    = phaseIn == "Evaluation"
+float usdPerQqq = nqRatio * 2.0           // $ per QQQ dollar per MNQ = QQQ shares per MNQ
+float slipUsd   = syminfo.mintick * usdPerQqq
+
+// -----------------------------------------------------------------------------
+// Chart validation
+// -----------------------------------------------------------------------------
+if not (timeframe.isminutes and timeframe.multiplier == 5)
+    runtime.error("NB3 Lucid: use a 5-minute chart (current: " + timeframe.period + ").")
+if not chart.is_standard
+    runtime.error("NB3 Lucid: use a standard candlestick chart.")
+if syminfo.ticker != "QQQ"
+    runtime.error("NB3 Lucid: the signal is validated on QQQ only (current: " + syminfo.tickerid + ").")
+
+// -----------------------------------------------------------------------------
+// Previous completed daily ATR(14), New York clock
+// -----------------------------------------------------------------------------
+string DAILY_TICKER = ticker.modify(syminfo.tickerid, session.regular)
+float prevDailyAtr = request.security(DAILY_TICKER, "D", ta.atr(LOOKBACK)[1], lookahead = barmerge.lookahead_on)
+
+int  nyMod     = hour(time, TZ) * 60 + minute(time, TZ)
+int  nyDow     = dayofweek(time, TZ)
+int  nyDateKey = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+bool inRegular = session.ismarket and nyDow >= dayofweek.monday and nyDow <= dayofweek.friday and nyMod >= OPEN_MOD and nyMod < SESSION_END_MOD
+
+// -----------------------------------------------------------------------------
+// Account state (LucidFlex 50K)
+// -----------------------------------------------------------------------------
+var float withdrawn   = 0.0
+var float eodHigh     = START_BAL
+var float floorBal    = START_BAL - MLL
+var bool  floorLocked = false
+var float dayStartE   = START_BAL
+var float bestDay     = 0.0
+var bool  passed      = false
+var bool  blown       = false
+var int   winDays     = 0
+var float cycleProfit = 0.0
+var int   payouts     = 0
+var float paidTotal   = 0.0
+var bool  dayLocked   = false
+var string lockReason = ""
+var int   acctDay     = na
+var int   tradesToday = 0
+
+float equityNow = strategy.equity - withdrawn
+
+// End-of-day bookkeeping, done on the first bar of the next session (the account is flat by then).
+if barstate.isconfirmed and inRegular and (na(acctDay) or nyDateKey != acctDay)
+    if not na(acctDay) and not blown
+        float dayPnl = equityNow - dayStartE
+        float profit = equityNow - START_BAL
+        eodHigh := math.max(eodHigh, equityNow)
+        if not floorLocked
+            floorBal := math.max(floorBal, math.min(eodHigh - MLL, START_BAL + LOCK))
+        bestDay := math.max(bestDay, dayPnl)
+        if isEval and not passed and profit >= TARGET_PNL and bestDay <= CONSISTENCY * profit
+            passed := true
+            label.new(bar_index, high, "EVALUATION PASSED\nprofit $" + str.tostring(profit, "#,###"), style = label.style_label_down, color = color.green, textcolor = color.white)
+        if not isEval
+            cycleProfit += dayPnl
+            if dayPnl >= WIN_DAY
+                winDays += 1
+            if simPayouts and payouts < MAX_PAYOUTS and winDays >= WIN_DAYS and cycleProfit > 0
+                float amt = math.min(math.min(PAY_FRAC * profit, PAY_CAP), equityNow - (START_BAL + LOCK) - PAY_KEEP)
+                if amt >= PAY_MIN
+                    withdrawn   += amt
+                    paidTotal   += amt
+                    payouts     += 1
+                    winDays     := 0
+                    cycleProfit := 0.0
+                    floorLocked := true
+                    floorBal    := START_BAL + LOCK
+                    equityNow   := strategy.equity - withdrawn
+                    label.new(bar_index, high, "PAYOUT $" + str.tostring(amt, "#,###") + " (#" + str.tostring(payouts) + ")", style = label.style_label_down, color = color.blue, textcolor = color.white)
+    acctDay     := nyDateKey
+    dayStartE   := equityNow
+    dayLocked   := false
+    lockReason  := ""
+    tradesToday := 0
+
+// -----------------------------------------------------------------------------
+// Signal engine (NB3 V2 rules; a second signal only after the first trade has closed)
+// -----------------------------------------------------------------------------
+var matrix<float> moveHist  = matrix.new<float>()
+var array<float>  todayMove = array.new<float>(BARS_PER_DAY, na)
+var int   sessDateKey  = na
+var float dayOpen      = na
+var int   signalsToday = 0
+var bool  waitExit     = false
+var bool  orderSent    = false
+var int   closedAtSend = 0
+var float sessAtr      = na
+var float stopDist     = na
+var float upperBand    = na
+var float lowerBand    = na
+
+bool buySignal  = false
+bool sellSignal = false
+
+// The last trade closed (stop or target, possibly inside this bar): later signals are allowed again.
+if barstate.isconfirmed and waitExit and orderSent and strategy.position_size == 0 and strategy.closedtrades > closedAtSend
+    waitExit  := false
+    orderSent := false
+
+if barstate.isconfirmed and inRegular
+    if na(sessDateKey) or nyDateKey != sessDateKey
+        if not na(sessDateKey) and not na(dayOpen)
+            moveHist.add_row(moveHist.rows(), todayMove.copy())
+            if moveHist.rows() > LOOKBACK
+                moveHist.remove_row(0)
+        sessDateKey  := nyDateKey
+        dayOpen      := nyMod == OPEN_MOD ? open : na
+        todayMove    := array.new<float>(BARS_PER_DAY, na)
+        signalsToday := 0
+        waitExit     := false
+        orderSent    := false
+        sessAtr      := prevDailyAtr
+        stopDist     := na
+        upperBand    := na
+        lowerBand    := na
+
+    int k = math.floor((nyMod - OPEN_MOD) / 5.0)
+    if not na(dayOpen)
+        todayMove.set(k, math.abs(close / dayOpen - 1))
+
+    if signalsToday < maxTrades and not waitExit and nyMod <= LAST_SIGNAL_MOD and moveHist.rows() == LOOKBACK and not na(dayOpen) and not na(sessAtr) and sessAtr > 0
+        float sigmaSum   = 0.0
+        int   sigmaCount = 0
+        for r = 0 to LOOKBACK - 1
+            float x = moveHist.get(r, k)
+            if not na(x)
+                sigmaSum   += x
+                sigmaCount += 1
+        if sigmaCount > 0
+            float sigma = sigmaSum / sigmaCount
+            upperBand := dayOpen * (1 + BAND_MULT * sigma)
+            lowerBand := dayOpen * (1 - BAND_MULT * sigma)
+            stopDist  := STOP_ATR * sessAtr
+            if close > upperBand
+                buySignal    := true
+                signalsToday += 1
+                waitExit     := true
+            else if close < lowerBand
+                sellSignal   := true
+                signalsToday += 1
+                waitExit     := true
+
+// -----------------------------------------------------------------------------
+// Risk monitoring on every bar: loss limit, daily loss limit, daily profit cap, end of day
+// -----------------------------------------------------------------------------
+float openWorst = 0.0
+if strategy.position_size > 0
+    openWorst := (low - strategy.position_avg_price) * strategy.position_size
+else if strategy.position_size < 0
+    openWorst := (strategy.position_avg_price - high) * math.abs(strategy.position_size)
+float equityWorst = strategy.equity - strategy.openprofit + openWorst - withdrawn
+
+if barstate.isconfirmed
+    if not blown and equityWorst <= floorBal
+        blown := true
+        strategy.close_all(comment = "Loss limit", immediately = true)
+        label.new(bar_index, low, "LOSS LIMIT HIT: account failed", style = label.style_label_up, color = color.red, textcolor = color.white)
+    if inRegular and not dayLocked and equityWorst - dayStartE <= -dailyLoss
+        dayLocked  := true
+        lockReason := "daily loss limit"
+        if strategy.position_size != 0
+            strategy.close_all(comment = "Daily loss", immediately = true)
+    if inRegular and not dayLocked and dailyProfit > 0 and equityNow - dayStartE >= dailyProfit
+        dayLocked  := true
+        lockReason := "daily profit cap"
+        if flattenAtCap and strategy.position_size != 0
+            strategy.close_all(comment = "Profit cap", immediately = true)
+    if strategy.position_size != 0 and (not inRegular or session.islastbar_regular)
+        strategy.close_all(comment = "Failsafe", immediately = true)
+    else if strategy.position_size != 0 and nyMod == EOD_SUBMIT_MOD
+        strategy.close_all(comment = "EOD 15:55")
+
+// -----------------------------------------------------------------------------
+// Entry decision
+// -----------------------------------------------------------------------------
+string skipWhy = ""
+if barstate.isconfirmed and (buySignal or sellSignal) and strategy.position_size == 0 and stopDist > 0
+    float rpc   = stopDist * usdPerQqq + COMM_RT + 2 * slipUsd
+    float prof0 = dayStartE - START_BAL
+    int   firmCap = isEval ? MAX_MICROS : (prof0 < 1000 ? 20 : prof0 < 2000 ? 30 : 40)
+    int   contracts = math.min(math.floor(riskBudget / rpc), math.min(maxContracts, firmCap))
+    float worst = contracts * (rpc + GAP_ALLOW)
+    float gain  = contracts * (rewardRisk * stopDist * usdPerQqq - COMM_RT - slipUsd)
+    float today = equityNow - dayStartE
+    if blown
+        skipWhy := "account failed"
+    else if isEval and passed and stopAtPass
+        skipWhy := "evaluation passed"
+    else if dayLocked
+        skipWhy := lockReason
+    else if contracts < 1
+        skipWhy := "one MNQ risks $" + str.tostring(rpc, "#") + " > budget"
+    else if today - worst < -dailyLoss
+        skipWhy := "would exceed the daily loss limit"
+    else if equityNow - worst - SAFETY < floorBal
+        skipWhy := "too close to the loss limit"
+    else if dailyProfit > 0 and today >= dailyProfit
+        skipWhy := "daily profit cap"
+    else if isEval and bestDayCapOn and today + gain > CONSISTENCY * TARGET_PNL
+        skipWhy := "best-day cap ($" + str.tostring(CONSISTENCY * TARGET_PNL, "#,###") + ")"
+    if skipWhy == ""
+        float qty         = contracts * usdPerQqq
+        float stopTicks   = stopDist / syminfo.mintick
+        float targetTicks = rewardRisk * stopDist / syminfo.mintick
+        if buySignal
+            strategy.entry("Long", strategy.long, qty = qty, comment = "NB3 BUY " + str.tostring(contracts) + " MNQ")
+            strategy.exit("Long Bracket", from_entry = "Long", loss = stopTicks, profit = targetTicks, comment_loss = "Stop", comment_profit = "Target")
+        else
+            strategy.entry("Short", strategy.short, qty = qty, comment = "NB3 SELL " + str.tostring(contracts) + " MNQ")
+            strategy.exit("Short Bracket", from_entry = "Short", loss = stopTicks, profit = targetTicks, comment_loss = "Stop", comment_profit = "Target")
+        orderSent    := true
+        closedAtSend := strategy.closedtrades
+        tradesToday  += 1
+        float nqStop = stopDist * nqRatio
+        alert(str.format("NB3 {0} QQQ {1}: {2} MNQ, stop {3} NQ points, target {4} NQ points ({5}R). Signal at the 5-minute close; enter at the next bar.",
+             buySignal ? "BUY" : "SELL", str.tostring(close, "#.00"), contracts, str.tostring(nqStop, "#.00"),
+             str.tostring(rewardRisk * nqStop, "#.00"), rewardRisk), alert.freq_once_per_bar_close)
+    else
+        waitExit := false                     // not traded: later bars may signal again
+        label.new(bar_index, buySignal ? low : high, "skipped: " + skipWhy, style = buySignal ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 20), textcolor = color.white, size = size.tiny)
+
+// -----------------------------------------------------------------------------
+// Output
+// -----------------------------------------------------------------------------
+plotshape(buySignal, title = "NB3 BUY", style = shape.arrowup, location = location.belowbar, color = color.rgb(0, 200, 0), size = size.small, display = display.all - display.status_line)
+plotshape(sellSignal, title = "NB3 SELL", style = shape.arrowdown, location = location.abovebar, color = color.rgb(220, 0, 0), size = size.small, display = display.all - display.status_line)
+plot(upperBand, "Upper band", color = color.new(color.teal, 40), style = plot.style_linebr)
+plot(lowerBand, "Lower band", color = color.new(color.orange, 40), style = plot.style_linebr)
+plot(stopDist, "Diag: stop distance (QQQ)", display = display.data_window)
+
+var table info = table.new(position.top_right, 2, 11, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    float profitNow = equityNow - START_BAL
+    float payAmt    = math.min(math.min(PAY_FRAC * profitNow, PAY_CAP), equityNow - (START_BAL + LOCK) - PAY_KEEP)
+    bool  payOk     = not isEval and winDays >= WIN_DAYS and cycleProfit > 0 and payAmt >= PAY_MIN and payouts < MAX_PAYOUTS
+    string status   = blown ? "FAILED (loss limit)" : isEval ? (passed ? "PASSED" : "in evaluation") : "funded"
+    table.cell(info, 0, 0, "LucidFlex 50K", text_color = color.white)
+    table.cell(info, 1, 0, phaseIn + ": " + status, text_color = blown ? color.red : color.white)
+    table.cell(info, 0, 1, "Balance", text_color = color.white)
+    table.cell(info, 1, 1, "$" + str.tostring(equityNow, "#,###"), text_color = color.white)
+    table.cell(info, 0, 2, "Loss limit", text_color = color.white)
+    table.cell(info, 1, 2, "$" + str.tostring(floorBal, "#,###") + " (room $" + str.tostring(equityNow - floorBal, "#,###") + ")", text_color = color.white)
+    table.cell(info, 0, 3, "Today", text_color = color.white)
+    table.cell(info, 1, 3, "$" + str.tostring(equityNow - dayStartE, "#,###") + ", trades " + str.tostring(tradesToday) + "/" + str.tostring(maxTrades), text_color = color.white)
+    table.cell(info, 0, 4, "Daily limits", text_color = color.white)
+    table.cell(info, 1, 4, "loss -$" + str.tostring(dailyLoss, "#,###") + (dailyProfit > 0 ? ", profit cap $" + str.tostring(dailyProfit, "#,###") : ", no profit cap") + (dayLocked ? " | LOCKED: " + lockReason : ""), text_color = dayLocked ? color.orange : color.white)
+    table.cell(info, 0, 5, "Evaluation", text_color = color.white)
+    table.cell(info, 1, 5, "profit $" + str.tostring(profitNow, "#,###") + " / $3,000, best day $" + str.tostring(bestDay, "#,###") + " (cap $1,200)", text_color = color.white)
+    table.cell(info, 0, 6, "Payout cycle", text_color = color.white)
+    table.cell(info, 1, 6, isEval ? "-" : str.tostring(winDays) + "/5 win days, cycle $" + str.tostring(cycleProfit, "#,###"), text_color = color.white)
+    table.cell(info, 0, 7, "Payout now", text_color = color.white)
+    table.cell(info, 1, 7, isEval ? "-" : payOk ? "request $" + str.tostring(payAmt, "#,###") : "not eligible", text_color = payOk ? color.lime : color.white)
+    table.cell(info, 0, 8, "Payouts taken", text_color = color.white)
+    table.cell(info, 1, 8, str.tostring(payouts) + " ($" + str.tostring(paidTotal, "#,###") + " gross, $" + str.tostring(paidTotal * 0.9, "#,###") + " to you)", text_color = color.white)
+    table.cell(info, 0, 9, "Settings", text_color = color.white)
+    table.cell(info, 1, 9, str.tostring(rewardRisk) + "R, " + str.tostring(maxTrades) + "/day, $" + str.tostring(riskBudget, "#") + " risk", text_color = color.white)
+    table.cell(info, 0, 10, "Note", text_color = color.white)
+    table.cell(info, 1, 10, "Simulation: QQQ shares = MNQ exposure", text_color = color.gray)

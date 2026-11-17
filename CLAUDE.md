@@ -47,7 +47,8 @@ Example structure:
 ### Current Structure
 ```
 GitHub/
-├── *.pine            # TradingView Pine v6 indicators/strategies (NB3 V2: nb3_breakout_v2_*.pine)
+├── *.pine            # TradingView Pine indicators/strategies (NB3 V2: nb3_breakout_v2_*.pine, v6;
+│                     #   LucidFlex steady: nb3_lucid_steady_strategy.pine, v5)
 ├── backtest/         # Research: data loaders, grid tests, NB3 verification, prop-firm simulator
 ├── tests/            # Research unit tests (Pine mirror engines)
 ├── nb3bot/           # Automated NB3 V2 futures bot (see nb3bot/README.md); tests in nb3bot/tests

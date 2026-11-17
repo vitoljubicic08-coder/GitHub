@@ -57,6 +57,10 @@ class TradeContext:
     edge_detail: str
     trades_today: int = 0
     max_trades_per_day: int = 1
+    day_locked: str = ""               # daily loss / profit lockout reason ("" = not locked)
+    max_daily_profit: float = 0.0      # 0 = off
+    consistency_cap: float | None = None   # evaluation best-day cap in $ (rule x profit target)
+    planned_gain: float = 0.0          # the trade's profit at its full target, after costs
 
 
 def evaluate(c: TradeContext) -> Decision:
@@ -95,6 +99,14 @@ def evaluate(c: TradeContext) -> Decision:
         add("firm_daily_limit", left >= 0, f"firm daily limit ${dll:,.0f}, today {acc.day_pnl():+,.2f}, left after worst case ${left:,.2f}")
     add("personal_daily_loss", acc.day_pnl() - s.worst_case_loss >= -c.max_daily_loss,
         f"today {acc.day_pnl():+,.2f}, limit -${c.max_daily_loss:,.0f}")
+    add("day_lockout", not c.day_locked, c.day_locked or "no daily lockout")
+    if c.max_daily_profit > 0:
+        add("daily_profit_cap", acc.day_pnl() < c.max_daily_profit,
+            f"today {acc.day_pnl():+,.2f}, daily profit cap ${c.max_daily_profit:,.0f}")
+    if c.consistency_cap is not None:
+        add("consistency_day_cap", acc.day_pnl() + c.planned_gain <= c.consistency_cap,
+            f"today {acc.day_pnl():+,.2f} + this trade's full target ${c.planned_gain:,.2f} vs best-day cap "
+            f"${c.consistency_cap:,.0f}")
     add("personal_weekly_loss", acc.week_pnl() - s.worst_case_loss >= -c.max_weekly_loss,
         f"this week {acc.week_pnl():+,.2f}, limit -${c.max_weekly_loss:,.0f}")
     add("personal_drawdown", acc.drawdown_from_hwm() + s.worst_case_loss <= c.max_total_drawdown,

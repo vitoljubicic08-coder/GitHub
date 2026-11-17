@@ -218,6 +218,12 @@ def safety_report(cfg) -> tuple[bool, list[str]]:
              f"{('$%s' % format(r.daily_loss_limit, ',.0f')) if r.daily_loss_limit else 'none'}",
              f"risk per trade:     evaluation ${cfg.risk.evaluation_risk_per_trade:,.0f}, funded ${cfg.risk.funded_risk_per_trade:,.0f} "
              f"(phase: {cfg.risk.phase}); max {cfg.risk.max_contracts} contract(s)",
+             f"strategy:           target {cfg.strategy.reward_risk:g}R, up to {cfg.strategy.max_trades_per_day} trade(s) a day",
+             f"daily limits:       loss -${min(cfg.risk.max_daily_loss, r.daily_loss_limit or 1e18):,.0f}"
+             f" ({'open trade closed and day locked' if cfg.risk.flatten_on_daily_loss else 'entries only'}), profit cap "
+             + (f"${cfg.risk.max_daily_profit:,.0f}" if cfg.risk.max_daily_profit > 0 else "off")
+             + (f", best-day cap ${r.consistency * r.profit_target:,.0f} (evaluation)"
+                if cfg.risk.consistency_day_cap and r.consistency and r.profit_target else ""),
              f"practice orders:    {'ENABLED' if cfg.authorization.practice_orders_enabled else 'disabled'}",
              f"live orders:        {'ENABLED' if cfg.authorization.live_orders_enabled else 'disabled'}"]
     safe = (cfg.broker.name == "paper" and cfg.bot.mode in ("paper", "replay")

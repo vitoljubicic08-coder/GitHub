@@ -57,7 +57,14 @@ class RiskCfg:
     evaluation_risk_per_trade: float = 350.0
     funded_risk_per_trade: float = 250.0
     max_contracts: int = 1                # hard cap; start with one MNQ
-    max_daily_loss: float = 400.0         # personal limit (stricter than the firm's)
+    max_daily_loss: float = 400.0         # personal limit (stricter than the firm's): checked before every
+                                          # entry, and while a trade is open (see flatten_on_daily_loss)
+    flatten_on_daily_loss: bool = True    # close the open trade and stop for the day if today's P&L incl. open
+                                          # P&L reaches -max_daily_loss (or the firm's daily limit, if lower)
+    max_daily_profit: float = 0.0         # 0 = off. Once today's P&L reaches this, no new entries today
+    flatten_on_daily_profit: bool = False # also close the open trade when max_daily_profit is reached
+    consistency_day_cap: bool = True      # evaluation with a best-day rule (Lucid 40%, Topstep 55%): no entry
+                                          # whose full target would push today above rule x profit target
     max_weekly_loss: float = 800.0
     max_total_drawdown: float = 2000.0    # from the account's high-water mark (= the firm's limit by default)
     safety_reserve: float = 100.0         # must remain above the firm loss limit after the worst case
@@ -189,6 +196,8 @@ def validate(cfg: Config) -> list[str]:
         e.append("strategy.early_close_policy: only 'skip' is supported (NB3 V2 defines no early-close rule)")
     if cfg.risk.phase not in ("evaluation", "funded"):
         e.append("risk.phase must be evaluation or funded")
+    if cfg.risk.max_daily_profit < 0:
+        e.append("risk.max_daily_profit must be 0 (off) or positive")
     if not cfg.strategy.reward_risk > 0:
         e.append("strategy.reward_risk must be positive")
     if cfg.strategy.max_trades_per_day not in (1, 2):

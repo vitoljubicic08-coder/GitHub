@@ -93,6 +93,10 @@ async function tick() {
   kv($("account"), [["Rules", esc(a.rules)], ["Starting balance", money(s.starting_balance)], ["Balance", money(a.balance)], ["Equity", money(a.equity)],
     ["Loss-limit floor", money(a.floor)], ["Room to the floor", money(a.remaining_allowance), a.remaining_allowance < 700 ? "bad" : ""],
     ["Today", money(a.day_pnl), a.day_pnl < 0 ? "bad" : "good"]]
+    .concat(s.daily_limits ? [["Daily limits", "loss -" + money(s.daily_limits.loss_limit)
+                                  + (s.daily_limits.profit_cap ? ", profit cap " + money(s.daily_limits.profit_cap) : ", no profit cap")
+                                  + (s.daily_limits.consistency_cap ? ", best-day cap " + money(s.daily_limits.consistency_cap) : "")],
+                               ["Today's lockout", s.daily_limits.locked ? esc(s.daily_limits.locked) : "none", s.daily_limits.locked ? "bad" : "good"]] : [])
     .concat(s.strategy ? [["Strategy", "target " + esc(s.strategy.reward_risk) + "R, up to " + esc(s.strategy.max_trades_per_day) + " trade(s) a day"],
                           ["Firm contract limit now", esc(s.strategy.firm_max_contracts_now)]] : [])
     .concat(s.payout ? [["Payout", s.payout.eligible ? "ELIGIBLE: request " + money(s.payout.recommended) + " (≈ " + money(s.payout.to_you_after_split) + " to you)"

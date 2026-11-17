@@ -23,6 +23,23 @@
 **Proof:** the bot reproduces the research trade for trade. In a 2023-26 replay all **1,097 trades are
 identical** (`nb3bot/tests/test_lucid_steady.py`, reference `nb3bot/validation/reference_lucid_steady_qqq_trades.csv`).
 
+## Daily limits (both profiles)
+
+| Limit | Lucid steady | When it acts |
+|---|---|---|
+| **Daily loss** | **-$800** (the firm's daily limit if lower; LucidFlex here has none) | **Before each entry:** today's P&L minus the new trade's worst case must stay above it. **While a trade is open:** if today's P&L including the open trade reaches it, the bot closes the trade and takes no more entries today (`flatten_on_daily_loss`). |
+| **Best-day cap** (evaluation only) | **$1,200** = 40% x $3,000 | No entry whose full target could push today above it, so Lucid's consistency rule never delays passing. Off in the funded phase (no consistency rule there). |
+| **Daily profit cap** | **off** (`max_daily_profit = 0`) | Optional: once today is up that much, no new entries; `flatten_on_daily_profit` also closes the open trade. |
+
+**Why the profit cap is off:**
+* Over 10 years, second trades taken after a winning first trade averaged +0.12R (2016-22) and
+  +0.01R (2023-26), so stopping after a good day would not have helped.
+* The worst day in 10 years was two full losses, about -2.1R, roughly -$610 at 1 MNQ. That is inside
+  the $800 limit.
+
+These limits come on top of the firm's trailing loss limit and your weekly and total limits, which the
+bot already checks before every trade. The start-up safety summary and the dashboard show them.
+
 ## What to expect (research, today's volatility, one $130 account)
 
 * **Chance of at least one payout within 12 months:**

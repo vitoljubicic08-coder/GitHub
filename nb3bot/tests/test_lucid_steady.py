@@ -68,6 +68,49 @@ class LiveStackTests(unittest.TestCase):
         rig.store.close()
 
 
+class DailyLimitTests(unittest.TestCase):
+    def rig(self, **risk):
+        cfg = load(PROFILE)
+        cfg = replace(cfg, data=replace(cfg.data, qqq_provider="replay", mnq_provider="replay", allow_empty_minutes=False),
+                      risk=replace(cfg.risk, max_contracts=1, **risk))
+        ss = synthetic(at_minute=22, move=6.0, then=0.02)
+        return build(cfg, ss, ss[14].key, tempfile.mkdtemp()), ss[14].key
+
+    def test_open_trade_is_closed_at_the_daily_loss_limit_and_the_day_locks(self):
+        rig, key = self.rig()
+        hit = []
+
+        def big_loss(r):                                 # simulate an earlier -$900 today while the trade is open
+            t = r.bot.mgr.active
+            if t is not None and t.state == "OPEN" and not hit:
+                r.bot.account.s.day_start_balance += 900.0
+                hit.append(1)
+        run_day(rig, key, hook=big_loss)
+        tr = rig.store.trades()
+        self.assertEqual(len(tr), 1)
+        self.assertEqual(tr[0]["exit_reason"], "DAILY_LOSS_LIMIT")
+        self.assertIn("daily loss limit", rig.bot.day.locked)
+        self.assertEqual(rig.broker.positions(), [])
+        rig.store.close()
+
+    def test_daily_profit_cap_stops_new_entries(self):
+        rig, key = self.rig(max_daily_profit=5.0)
+        run_day(rig, key)
+        tr = rig.store.trades()
+        self.assertEqual(len(tr), 1)                     # the second signal is not traded
+        self.assertIn("daily profit cap", rig.bot.day.locked)
+        failed = [c["check"] for c in rig.bot.day.decision["checks"] if not c["ok"]]
+        self.assertIn("day_lockout", failed)
+        rig.store.close()
+
+    def test_consistency_cap_is_lucid_40_percent_of_target_in_evaluation_only(self):
+        rig, _ = self.rig()
+        self.assertEqual(rig.bot.consistency_cap(), 1200.0)
+        rig.bot.cfg = replace(rig.bot.cfg, risk=replace(rig.bot.cfg.risk, phase="funded"))
+        self.assertIsNone(rig.bot.consistency_cap())
+        rig.store.close()
+
+
 class AccountRuleTests(unittest.TestCase):
     def test_funded_scaling_plan(self):
         acc = AccountTracker(PRESETS["lucid_flex_50k_funded"])

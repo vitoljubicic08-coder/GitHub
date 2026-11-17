@@ -53,7 +53,15 @@ phase = "evaluation"               # switch to "funded" (and account.preset belo
 evaluation_risk_per_trade = 350.0
 funded_risk_per_trade = 350.0
 max_contracts = 3                  # bot cap; the firm caps (40 / scaling plan) apply too
-max_daily_loss = 800.0             # two full losses a day are possible with 2 trades
+max_daily_loss = 800.0             # two full losses a day are possible with 2 trades (worst day in 10 years: -2.1R
+                                   # = about -$610 at 1 MNQ). Checked before each entry AND while a trade is open:
+flatten_on_daily_loss = true       # if today incl. the open trade reaches -$800, close it and stop for the day
+max_daily_profit = 0.0             # 0 = no daily profit cap. Research: second trades after a winning first trade
+                                   # averaged +0.12R (2016-22) and +0.01R (2023-26), so stopping early did not help.
+                                   # Set e.g. 600 to stop new entries once the day is up $600.
+flatten_on_daily_profit = false    # true = also close the open trade at the profit cap (cuts winners: not advised)
+consistency_day_cap = true         # evaluation: no entry whose full target could push today above 40% x $3,000 =
+                                   # $1,200, so the best-day rule never delays passing
 max_weekly_loss = 2000.0
 max_total_drawdown = 2000.0
 safety_reserve = 100.0

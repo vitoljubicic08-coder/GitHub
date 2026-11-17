@@ -47,7 +47,11 @@ phase = "evaluation"               # evaluation ($350 budget) | funded ($250 bud
 evaluation_risk_per_trade = 350.0  # a trade is SKIPPED if one MNQ (stop + costs) costs more
 funded_risk_per_trade = 250.0
 max_contracts = 1
-max_daily_loss = 400.0
+max_daily_loss = 400.0             # checked before each entry and while a trade is open
+flatten_on_daily_loss = true       # today incl. the open trade at -$400 (or the firm's $1,000 limit): close and stop
+max_daily_profit = 0.0             # 0 = no daily profit cap (one trade a day anyway)
+flatten_on_daily_profit = false
+consistency_day_cap = true         # evaluation: today's best day kept within 55% x $3,000 = $1,650
 max_weekly_loss = 800.0
 max_total_drawdown = 2000.0
 safety_reserve = 100.0

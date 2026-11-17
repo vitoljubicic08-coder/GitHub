@@ -51,6 +51,7 @@ class Day:
     signals: list = field(default_factory=list)
     trade_keys: list = field(default_factory=list)
     awaiting: dict | None = None               # last signal waiting for its trade to close (2-trade profile)
+    locked: str = ""                           # daily loss / profit lockout reason
     decision: dict | None = None
     eod_done: bool = False
     data_errors: list = field(default_factory=list)
@@ -171,6 +172,7 @@ class Bot:
             self._poll(now)
             self._complete_bars(now)
             self._mark(now)
+            self._daily_limits()
         self.mgr.tick()
         if (now - self.last_reconcile).total_seconds() >= 15:
             self.last_reconcile = now
@@ -326,6 +328,38 @@ class Bot:
         last = self.day.exe.bars[max(self.day.exe.bars)].c
         self.account.mark(t.side * (last - t.fill_price) * (t.filled_size or t.size) * t.tick_value / t.tick_size)
 
+    def daily_loss_limit(self) -> float:
+        """The stricter of the personal daily loss limit and the firm's daily loss limit (if it has one)."""
+        firm = self.account.r.daily_loss_limit
+        return min(self.cfg.risk.max_daily_loss, firm) if firm else self.cfg.risk.max_daily_loss
+
+    def consistency_cap(self) -> float | None:
+        r = self.account.r
+        if self.cfg.risk.phase != "evaluation" or not self.cfg.risk.consistency_day_cap or not (r.consistency and r.profit_target):
+            return None
+        return r.consistency * r.profit_target
+
+    def _daily_limits(self) -> None:
+        """While trading: today's P&L including the open trade against the daily loss limit and profit cap."""
+        day, t, rk = self.day, self.mgr.active, self.cfg.risk
+        pnl = self.account.day_pnl()
+        open_trade = t is not None and t.state in ("OPEN", "PROTECTING")
+        lim = self.daily_loss_limit()
+        if pnl <= -lim:
+            if not day.locked:
+                day.locked = f"daily loss limit reached: today {pnl:+,.2f} <= -${lim:,.0f}; no more entries today"
+                self.audit.log("daily_loss_lockout", "WARN", day_pnl=round(pnl, 2), limit=lim)
+                self.alert.send(day.locked, "WARN", key=f"dll-{day.key}")
+            if open_trade and rk.flatten_on_daily_loss:
+                self.mgr.flatten(t, "DAILY_LOSS_LIMIT")
+        elif rk.max_daily_profit > 0 and pnl >= rk.max_daily_profit:
+            if not day.locked:
+                day.locked = f"daily profit cap reached: today {pnl:+,.2f} >= ${rk.max_daily_profit:,.0f}; no more entries today"
+                self.audit.log("daily_profit_lockout", day_pnl=round(pnl, 2), cap=rk.max_daily_profit)
+                self.alert.send(day.locked, "INFO", key=f"dpc-{day.key}")
+            if open_trade and rk.flatten_on_daily_profit:
+                self.mgr.flatten(t, "DAILY_PROFIT_CAP")
+
     # ------------------------------------------------------------------ signals
     def _on_signal(self, sig: dict, bar_end: datetime, now: datetime, incomplete: bool) -> None:
         day = self.day
@@ -413,7 +447,10 @@ class Bot:
                            safety_reserve=self.cfg.risk.safety_reserve, consecutive_losses=losses,
                            halt_after_consecutive_losses=self.cfg.risk.halt_after_consecutive_losses,
                            edge_status=es, edge_detail=ed, trades_today=done_today,
-                           max_trades_per_day=self.params.max_trades_per_day)
+                           max_trades_per_day=self.params.max_trades_per_day, day_locked=day.locked,
+                           max_daily_profit=self.cfg.risk.max_daily_profit, consistency_cap=self.consistency_cap(),
+                           planned_gain=sizing.contracts * (sizing.target_ticks * tv - self.cfg.costs.commission_round_turn
+                                                            - self.cfg.costs.slippage_ticks_per_side * tv))
         dec = evaluate(ctx)
         day.decision = {**dec.to_dict(), "sizing": sizing.to_dict(), "exec_price": exec_px, "stop_points": stop_pts}
         self.audit.log("risk_decision", "INFO" if dec.allowed else "WARN", allowed=dec.allowed,
@@ -522,6 +559,9 @@ class Bot:
             "payout": (payout_advice(self.account, pr, self.cfg.account.payout_keep_above_floor)
                        if pr and self.cfg.risk.phase == "funded" else None),
             "today_signals": day.signals if day else [],
+            "daily_limits": {"loss_limit": self.daily_loss_limit(), "profit_cap": self.cfg.risk.max_daily_profit or None,
+                             "consistency_cap": self.consistency_cap(), "locked": day.locked if day else "",
+                             "day_pnl": round(self.account.day_pnl(), 2)},
             "profile": self.cfg.bot.profile, "banner": self.cfg.bot.banner,
             "data_sources": {"signal": getattr(self.sig_src, "name", "?"), "execution_prices": getattr(self.exe_src, "name", "?"),
                              "notes": list(getattr(self.sig_src, "notes", []))[-3:]},

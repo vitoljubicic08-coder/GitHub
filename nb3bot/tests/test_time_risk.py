@@ -130,13 +130,18 @@ class GuardTests(unittest.TestCase):
         from nb3bot.risk.sizing import SizingResult
         acc = AccountTracker(PRESETS["topstep_combine_50k"])
         acc.realize(-1300)                              # $700 above the floor: worst case leaves < $500
+        up = AccountTracker(PRESETS["topstep_combine_50k"])
+        up.realize(200)                                 # today +$200
         cases = {"armed": dict(entries_permitted=False), "no_halt": dict(halt_reasons=["x"]),
                  "trading_day": dict(trading_day=False), "not_early_close": dict(early_close=True),
                  "signal_fresh": dict(signal_bar_close=ctx().now - timedelta(seconds=90)),
                  "trades_per_day": dict(traded_today=True), "market_data": dict(data_ok=False),
                  "broker": dict(broker_ok=False), "flat": dict(flat_and_no_orders=False), "contract": dict(contract_ok=False),
                  "size": dict(sizing=SizingResult(0, 124, 496, 1488, 250.22, 0, 0, 250, "too big")),
-                 "loss_limit_headroom": dict(account=acc), "edge_monitor": dict(edge_status="stop")}
+                 "loss_limit_headroom": dict(account=acc), "edge_monitor": dict(edge_status="stop"),
+                 "day_lockout": dict(day_locked="daily loss limit reached"),
+                 "daily_profit_cap": dict(max_daily_profit=100.0, account=up),
+                 "consistency_day_cap": dict(consistency_cap=1200.0, planned_gain=1300.0)}
         for name, over in cases.items():
             d = evaluate(ctx(**over))
             self.assertFalse(d.allowed, name)

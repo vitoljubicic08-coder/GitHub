@@ -64,3 +64,13 @@ Committed BEFORE either test is run (`backtest/run_lucid5.py`, `backtest/lucid5.
 * **Grid, objective, picks and check:** identical to Part 2.
   * Design: 2016-2022, rescaled.
   * Check, run once: 2023-26 rescaled, with full and half edge, and design rescaled with half edge.
+
+## Outcome (added after the runs; details in RESULTS_5.md)
+
+* **Part 1:** 2016-01..2023-02: +0.049R per trade, t = 1.44 over 1,629 trades. Verdict: **weak**.
+* **Part 2:** the balanced pick (NB3 V2 exits, $250 / $250, keep $500) won every check: 72% vs 51%
+  paid within 12 months on 2023-26. Its $250 budget would skip most trades at today's volatility.
+* **Part 2b:** the pick at today's volatility is stop 0.3 ATR, 1.5R, up to 2 trades/day, $350 / $350,
+  keep $500.
+  * Paid within 12 months: **40.6%** vs 32.7% for the bot's setting on 2023-26.
+  * Half the edge: 23.1% vs 14.5%. 2016-22 with half the edge: 18.9% vs 6.7%.

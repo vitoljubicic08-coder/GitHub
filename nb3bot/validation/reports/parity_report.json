@@ -1,0 +1,23 @@
+{
+ "passed": true,
+ "reference_trades": 675,
+ "bot_trades": 675,
+ "matched_exactly": 675,
+ "discrepancies": 0,
+ "tolerance": 1e-09,
+ "max_abs_diff": {
+  "fill": 0.0,
+  "dist": 0.0,
+  "exit_px": 0.0,
+  "r_net": 0.0,
+  "r_gross": 0.0
+ },
+ "data_source": "/tmp/claude-0/-home-user-GitHub/f4c38b43-8d2d-5827-bc2b-19009e738a12/scratchpad/inst (774 sessions, up to 20260331)",
+ "bot_stats": {
+  "trades": 675,
+  "mean_r": 0.19537904578442253,
+  "win_rate": 0.45037037037037037,
+  "total_r": 131.8808559044852
+ },
+ "discrepancy_list": []
+}

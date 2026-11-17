@@ -1,0 +1,92 @@
+# NB3 V2 bot configuration. Copy to nb3bot.toml and edit. Secrets (API keys, tokens) are NEVER written
+# here: put them in environment variables whose NAMES are given below.
+# Safe defaults: paper broker, and both order-sending switches OFF.
+
+[bot]
+mode = "paper"                 # replay | paper | practice | live   (must match --mode when you run)
+state_dir = "state"            # database, kill-switch file, authorization files, dashboard token
+log_dir = "logs"               # audit-YYYYMMDD.jsonl files
+display_timezone = "Europe/Zagreb"
+loop_interval_seconds = 1.0
+
+[strategy]
+signal_source = "QQQ"          # QQQ = the validated source (needs a real-time QQQ feed).
+                               # MNQ = signals from MNQ bars (same bar 97% of the time); then set
+                               #       instrument.stop_conversion = "native_atr"
+early_close_policy = "skip"    # NB3 V2 defines no rule for 1:00 pm early closes; the bot does not trade them
+max_signal_delay_seconds = 45  # do not enter if more than this after the 5-minute bar closed
+warmup_sessions = 250          # history downloaded once to build the noise band and ATR
+
+[instrument]
+symbol = "MNQ"                 # Micro E-mini Nasdaq-100
+tick_size = 0.25
+tick_value = 0.50
+point_value = 2.0
+stop_conversion = "qqq_ratio"  # MNQ stop = QQQ stop x (MNQ price / QQQ price) at the signal
+roll_days_before_expiry = 8
+
+[costs]
+commission_round_turn = 1.22   # Topstep MNQ all-in; check your firm
+slippage_ticks_per_side = 1.0
+extra_stop_slippage_ticks = 4.0
+
+[risk]
+phase = "evaluation"           # evaluation | funded
+evaluation_risk_per_trade = 350.0   # research optimum; includes commission and slippage
+funded_risk_per_trade = 250.0       # research optimum: skips days when one MNQ risks more (see docs)
+max_contracts = 1              # start with ONE contract
+max_daily_loss = 400.0         # personal limits, stricter than the firm's
+max_weekly_loss = 800.0
+max_total_drawdown = 1500.0
+safety_reserve = 500.0         # keep at least this above the firm loss limit after a worst-case loss
+halt_after_consecutive_losses = 0   # 0 = off (not part of the tested strategy)
+edge_stop_rules = true         # pre-registered stop rules (50/100/200-trade checks)
+
+[account]
+# presets: topstep_combine_50k, topstep_xfa_50k, lucid_flex_50k_eval, lucid_flex_50k_funded,
+#          tradeify_growth_50k_eval, tradeify_growth_50k_funded, or "custom" (then fill the rest)
+preset = "topstep_combine_50k"
+starting_balance = 50000.0
+max_loss_limit = 2000.0
+trailing = "eod"
+lock_profit = 0.0
+daily_loss_limit = 1000.0
+max_contracts_firm = 50
+
+[broker]
+name = "paper"                 # paper (simulated fills on live MNQ data) | projectx (practice/live orders)
+api_base = "https://api.topstepx.com"
+market_hub = "https://rtc.topstepx.com/hubs/market"
+user_hub = "https://rtc.topstepx.com/hubs/user"
+account_id = 0                 # from `python -m nb3bot check`
+username_env = "PROJECTX_USERNAME"   # environment variable holding your platform user name
+api_key_env = "PROJECTX_API_KEY"     # environment variable holding your API key
+live_data = false
+auto_oco_brackets_confirmed = false  # set true only after enabling Auto OCO Brackets in TopstepX risk settings
+fill_timeout_seconds = 10.0
+bracket_check_seconds = 5.0
+
+[data]
+qqq_provider = "massive"
+qqq_api_base = "https://api.massive.com"
+qqq_api_key_env = "MASSIVE_API_KEY"
+mnq_provider = "projectx"
+bar_grace_seconds = 3.0
+max_bar_delay_seconds = 20.0
+max_ratio_deviation = 0.01
+
+[authorization]
+practice_orders_enabled = false      # practice-account orders (no money) - needs `authorize --mode practice`
+live_orders_enabled = false          # real evaluation/funded orders - needs `authorize --mode live`
+
+[alerts]
+telegram_bot_token_env = "NB3_TELEGRAM_TOKEN"
+telegram_chat_id = ""
+webhook_url = ""
+email_smtp_host = ""
+email_to = ""
+
+[dashboard]
+enabled = true
+host = "127.0.0.1"
+port = 8765

@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+state/
+logs/
+runs/
+nb3bot.toml

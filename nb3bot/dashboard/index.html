@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NB3 V2 Bot</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#ffffff; --text:#1d1d1b; --muted:#6b6b66; --line:#e3e2dd;
+          --good:#1f7a3a; --bad:#b3261e; --warn:#9a6700; --accent:#1f5fbf; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151514; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a29c;
+          --line:#33332f; --good:#5cc27a; --bad:#ff7b72; --warn:#e3b341; --accent:#7aa7ff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { padding:14px 16px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;
+           border-bottom:1px solid var(--line); background:var(--card); }
+  h1 { font-size:17px; margin:0; }
+  .clock { color:var(--muted); font-variant-numeric:tabular-nums; }
+  main { padding:16px; display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); max-width:1300px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 8px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; }
+  .kv div:nth-child(odd) { color:var(--muted); }
+  .num { font-variant-numeric:tabular-nums; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-weight:600; font-size:12px; border:1px solid currentColor; }
+  .good { color:var(--good); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; }
+  .wide { grid-column:1 / -1; }
+  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--bad); background:var(--bad); color:#fff; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--text); border-color:var(--line); }
+  input { font:inherit; padding:7px 9px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); width:220px; }
+  .small { font-size:12px; color:var(--muted); }
+  ul { margin:0; padding-left:18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NB3 V2 Bot <span id="mode" class="pill"></span> <span id="armed" class="pill"></span></h1>
+  <div class="clock"><span id="tny"></span> &nbsp;·&nbsp; <span id="tzg"></span></div>
+</header>
+<main>
+  <section class="card"><h2>Safety</h2><div class="kv" id="safety"></div></section>
+  <section class="card"><h2>Account and risk</h2><div class="kv" id="account"></div></section>
+  <section class="card"><h2>Today</h2><div class="kv" id="today"></div></section>
+  <section class="card"><h2>Open trade</h2><div class="kv" id="trade"></div></section>
+  <section class="card"><h2>Performance (bot's own trades)</h2><div class="kv" id="perf"></div></section>
+  <section class="card"><h2>Market data</h2><div class="kv" id="data"></div></section>
+  <section class="card wide"><h2>Risk checks for today's signal</h2><table id="checks"></table></section>
+  <section class="card wide"><h2>Recent trades</h2><table id="trades"></table></section>
+  <section class="card wide"><h2>Alerts</h2><ul id="alerts"></ul></section>
+  <section class="card wide"><h2>Emergency controls</h2>
+    <p class="small">The kill switch cancels every order, closes every position and disarms the bot. The token is in
+      <code>state/dashboard_token.txt</code> on this computer.</p>
+    <input id="token" type="password" placeholder="dashboard token" autocomplete="off">
+    <button onclick="post('/api/kill')">KILL: flatten everything</button>
+    <button class="secondary" onclick="post('/api/disarm')">Disarm (no new entries)</button>
+    <span id="ctl" class="small"></span>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "—").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const money = v => v == null ? "—" : (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2});
+function kv(el, rows) { el.innerHTML = rows.map(([k, v, cls]) => `<div>${esc(k)}</div><div class="num ${cls||""}">${v}</div>`).join(""); }
+async function post(path) {
+  const r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({token:$("token").value})});
+  $("ctl").textContent = r.ok ? "Done." : "Refused (" + r.status + ")";
+}
+async function tick() {
+  let s;
+  try { s = await (await fetch("/api/status")).json(); } catch (e) { $("tny").textContent = "bot not reachable"; return; }
+  $("tny").textContent = s.time_new_york || ""; $("tzg").textContent = s.time_zagreb || "";
+  $("mode").textContent = (s.mode || "").toUpperCase();
+  $("mode").className = "pill " + (s.mode === "live" ? "bad" : s.mode === "practice" ? "warn" : "good");
+  $("armed").textContent = s.armed ? "ARMED" : "DISARMED"; $("armed").className = "pill " + (s.armed ? "good" : "warn");
+  const halts = (s.halts || []);
+  kv($("safety"), [
+    ["Kill switch", s.kill_switch ? "ACTIVE" : "off", s.kill_switch ? "bad" : "good"],
+    ["Halts", halts.length ? esc(halts.join("; ")) : "none", halts.length ? "bad" : "good"],
+    ["Order authorization", esc(s.authorization)],
+    ["Broker", esc(s.broker) + (s.broker_error ? " — " + esc(s.broker_error) : ""), s.broker_error ? "bad" : ""],
+    ["Reconciliation", s.reconcile_ok ? "consistent" : "MISMATCH", s.reconcile_ok ? "good" : "bad"]]);
+  const a = s.account || {};
+  kv($("account"), [["Rules", esc(a.rules)], ["Balance", money(a.balance)], ["Equity", money(a.equity)],
+    ["Loss-limit floor", money(a.floor)], ["Room to the floor", money(a.remaining_allowance), a.remaining_allowance < 700 ? "bad" : ""],
+    ["Today", money(a.day_pnl), a.day_pnl < 0 ? "bad" : "good"]]);
+  const sig = s.today_signal;
+  kv($("today"), [["Session", esc(s.session)], ["Early close", s.early_close ? "yes (no trading)" : "no"],
+    ["Contract", esc(s.contract)], ["Engine warm", s.engine_warm ? "yes" : "NO", s.engine_warm ? "good" : "bad"],
+    ["Signal", sig ? (sig.direction > 0 ? "BUY" : "SELL") + " on bar " + sig.bar : "none yet"],
+    ["Decision", s.today_decision ? (s.today_decision.allowed ? "traded" : "not traded") : "—", s.today_decision ? (s.today_decision.allowed ? "good" : "warn") : ""]]);
+  const t = s.active_trade;
+  kv($("trade"), t ? [["State", esc(t.state)], ["Side / size", (t.side > 0 ? "BUY " : "SELL ") + t.size], ["Fill", esc(t.fill_price)],
+    ["Stop", esc(t.stop_price)], ["Target", esc(t.target_price)], ["Exit", esc(t.exit_reason)]] : [["Position", "flat"]]);
+  const p = s.performance || {};
+  kv($("perf"), [["Trades", esc(p.trades)], ["Mean R", esc(p.mean_r)], ["Win rate", p.win_rate == null ? "—" : (100 * p.win_rate).toFixed(1) + "%"],
+    ["Total P&L", money(p.total_pnl)], ["Edge monitor", esc(p.edge_status) + " — " + esc(p.edge_detail), p.edge_status === "ok" ? "good" : "bad"],
+    ["Backtest reference", esc(p.backtest_reference)]]);
+  const d = s.data || {};
+  kv($("data"), [["Signal bars today", esc(d.signal_bars)], ["MNQ bars today", esc(d.exec_bars)], ["Last bar (New York)", esc(d.last_bar_new_york)],
+    ["Incomplete 5-min bars", esc((d.incomplete_bars || []).join(", ") || "none"), (d.incomplete_bars || []).length ? "warn" : "good"],
+    ["Errors", esc((d.errors || []).join(" | ") || "none"), (d.errors || []).length ? "bad" : "good"]]);
+  const chk = (s.today_decision && s.today_decision.checks) || [];
+  $("checks").innerHTML = "<tr><th>Check</th><th>Result</th><th>Detail</th></tr>" +
+    (chk.length ? chk.map(c => `<tr><td>${esc(c.check)}</td><td class="${c.ok ? "good" : "bad"}">${c.ok ? "pass" : "FAIL"}</td><td>${esc(c.detail)}</td></tr>`).join("")
+                : `<tr><td colspan="3" class="small">No signal yet today.</td></tr>`);
+  const tr = s.recent_trades || [];
+  $("trades").innerHTML = "<tr><th>Session</th><th>Side</th><th>Size</th><th>Fill</th><th>Exit</th><th>Reason</th><th>P&amp;L</th><th>R</th></tr>" +
+    tr.map(x => `<tr><td>${x.session}</td><td>${esc(x.side)}</td><td>${esc(x.size)}</td><td>${esc(x.fill_price)}</td><td>${esc(x.exit_price && x.exit_price.toFixed ? x.exit_price.toFixed(2) : x.exit_price)}</td><td>${esc(x.exit_reason)}</td><td class="${x.pnl < 0 ? "bad" : "good"}">${money(x.pnl)}</td><td>${x.r_multiple == null ? "—" : x.r_multiple.toFixed(2)}</td></tr>`).join("");
+  $("alerts").innerHTML = (s.alerts || []).slice().reverse().map(([lvl, txt]) => `<li class="${lvl === "CRITICAL" ? "bad" : lvl === "WARN" ? "warn" : ""}">${esc(lvl)}: ${esc(txt)}</li>`).join("");
+}
+tick(); setInterval(tick, 2000);
+</script>
+</body>
+</html>

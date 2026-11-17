@@ -1,0 +1,10 @@
+win: Spearman dev vs holdout = +0.824 over 4265 settings
+tgt: Spearman dev vs holdout = +0.926 over 4265 settings
+avg_r: Spearman dev vs holdout = +0.555 over 4265 settings
+HINDSIGHT best holdout win: SPY|nb3|["nr7", "first"]|0.5|1|3.0 n=50 win=0.660 tgt=0.000 avgR=+0.260 (dev win=0.508 tgt=0.000)
+  settings with holdout win >= 70%: 0
+HINDSIGHT best holdout tgt: SPY|va80|2|0.1|1|3.0 n=90 win=0.422 tgt=0.367 avgR=+0.578 (dev win=0.297 tgt=0.272)
+  settings with holdout tgt >= 70%: 0
+avg R: top-10% by dev -> holdout mean +0.045; all -> -0.066; dev top-10% mean +0.158
+target hit: top-10% by dev (0.233) -> holdout 0.210; all holdout 0.092
+{"settings_compared": 4265, "max_holdout_target_hit": 0.36666666666666664, "max_holdout_win": 0.66}

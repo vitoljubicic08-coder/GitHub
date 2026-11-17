@@ -1,0 +1,104 @@
+{
+ "events_dev": 49448,
+ "base_rate_dev": 0.1182,
+ "thresholds": {
+  "p90": 0.2356,
+  "p97": 0.28968
+ },
+ "dev_oof": [
+  {
+   "set": "all OOF events",
+   "n": 39678,
+   "target_hit": 0.1179,
+   "target_ci": [
+    0.115,
+    0.121
+   ],
+   "win": 0.3308,
+   "win_ci": [
+    0.326,
+    0.335
+   ],
+   "avg_r": -0.1302
+  },
+  {
+   "set": "OOF score >= p90",
+   "n": 3968,
+   "target_hit": 0.2082,
+   "target_ci": [
+    0.196,
+    0.221
+   ],
+   "win": 0.2442,
+   "win_ci": [
+    0.231,
+    0.258
+   ],
+   "avg_r": -0.163
+  },
+  {
+   "set": "OOF score >= p97",
+   "n": 1191,
+   "target_hit": 0.2116,
+   "target_ci": [
+    0.189,
+    0.236
+   ],
+   "win": 0.2494,
+   "win_ci": [
+    0.226,
+    0.275
+   ],
+   "avg_r": -0.1379
+  }
+ ],
+ "dev_oof_auc": 0.6898,
+ "holdout": [
+  {
+   "set": "all holdout events",
+   "n": 34530,
+   "target_hit": 0.1248,
+   "target_ci": [
+    0.121,
+    0.128
+   ],
+   "win": 0.3418,
+   "win_ci": [
+    0.337,
+    0.347
+   ],
+   "avg_r": -0.0832
+  },
+  {
+   "set": "score >= p90",
+   "n": 2048,
+   "target_hit": 0.2222,
+   "target_ci": [
+    0.205,
+    0.241
+   ],
+   "win": 0.2397,
+   "win_ci": [
+    0.222,
+    0.259
+   ],
+   "avg_r": -0.1362
+  },
+  {
+   "set": "score >= p97",
+   "n": 142,
+   "target_hit": 0.1479,
+   "target_ci": [
+    0.099,
+    0.216
+   ],
+   "win": 0.1479,
+   "win_ci": [
+    0.099,
+    0.216
+   ],
+   "avg_r": -0.4606
+  }
+ ],
+ "holdout_auc": 0.6915
+}

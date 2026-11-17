@@ -424,7 +424,7 @@ def smt_signals(a: dict, b: dict, kind: str):
 def bracket(d: dict, sig: np.ndarray, stop, lvl=None, rrs=RRS4, max_trades: int = 1,
             last_entry_min: int = 330, eod_min: int = il.EOD_MIN) -> dict:
     """stop = ATR multiple (float) or "struct" (uses `lvl`). Returns {rr: dict of per-trade arrays}:
-    r (net R), kind (0 stop / 1 target / 2 time exit), day (row index), bar, dirn."""
+    r (net R), kind (0 stop / 1 target / 2 time exit), day (row index), bar, dirn, dist (stop distance in ATR)."""
     o, h, l, cf = d["o"], d["h"], d["l"], d["cf"]
     atr = d["atr_prev"]
     slip = il.SLIP_TICKS * il.TICK
@@ -439,7 +439,7 @@ def bracket(d: dict, sig: np.ndarray, stop, lvl=None, rrs=RRS4, max_trades: int 
     entry_min = (BARS + 1) * 5
     out = {}
     for rr in rrs:
-        acc = {k: [] for k in ("r", "kind", "day", "bar", "dirn")}
+        acc = {k: [] for k in ("r", "kind", "day", "bar", "dirn", "dist")}
         busy = np.full(n, -1)
         for _ in range(max_trades):
             ok = (sig != 0) & (entry_min[None, :] < last_entry_min) & (entry_min[None, :] > busy[:, None])
@@ -491,6 +491,7 @@ def bracket(d: dict, sig: np.ndarray, stop, lvl=None, rrs=RRS4, max_trades: int 
             acc["day"].append(sel)
             acc["bar"].append(b)
             acc["dirn"].append(dirn)
+            acc["dist"].append(dist / atr[sel])
             busy[sel] = xm
         out[rr] = {k: (np.concatenate(v) if v else np.array([])) for k, v in acc.items()}
     return out

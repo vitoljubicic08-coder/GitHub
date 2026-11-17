@@ -82,3 +82,16 @@ Committed BEFORE the round-4 development grid is run (`backtest/run_grid4.py`, `
   with 95% intervals), average R, profit factor and per-year R.
 * **"Goal met"** only if a finalist's holdout win rate is >= 70% at 1:3 with n >= 50. The target-hit
   rate is stated alongside it.
+
+## Outcome (added after the holdout run; details in RESULTS_4.md)
+
+* **Development:** 6,145 rows at 1:3, 578 eligible. **No row reached 70%, even in-sample.**
+  * Best win rate: 66.7%, with 0% of trades hitting 3R.
+  * Best 3R target-hit rate: 42.9%, n = 70.
+* **Holdout** (27 new finalists, run once): 9 had a positive average R, none beat NB3 V2 (+0.255R),
+  and the development stars collapsed (42.9% target hit → 17.4%; 66.7% win → 37.8%).
+* **Meta-model:** AUC 0.69 on development and on the holdout. Its top 10% hit 3R 22% of the time,
+  at -0.136R per trade.
+* **Hindsight diagnostic** (whole grid on the holdout, not used for selection): the maximum win rate
+  was 66% and the maximum target-hit rate 36.7%.
+* **Goal not met.**

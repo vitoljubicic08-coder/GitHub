@@ -1,0 +1,98 @@
+{
+ "QQQ->NQ": {
+  "days": 50,
+  "first_day": 20260908,
+  "last_day": 20261116,
+  "price_ratio": {
+   "median": 41.380697310451666,
+   "min": 40.94528947745888,
+   "max": 41.52923845876323
+  },
+  "corr_5min_returns": 0.9785102870536624,
+  "signal_days_etf": 45,
+  "signal_days_future": 35,
+  "signal_days_both": 35,
+  "same_direction": 1.0,
+  "same_bar": 0.9714285714285714,
+  "bar_diff_median": 0.0,
+  "etf_own_signals": {
+   "trades": 45,
+   "mean_r": 0.2544987640820063,
+   "win_rate": 0.4444444444444444,
+   "total_r": 11.452444383690283,
+   "t_stat": 1.2137849661117859
+  },
+  "etf_own_signals_same_days": {
+   "trades": 35,
+   "mean_r": 0.12587803508980136,
+   "win_rate": 0.4,
+   "total_r": 4.405731228143048,
+   "t_stat": 0.5465282611581057
+  },
+  "future_own_signals": {
+   "trades": 35,
+   "mean_r": 0.13407501893940998,
+   "win_rate": 0.4,
+   "total_r": 4.692625662879349,
+   "t_stat": 0.5846566737211186
+  },
+  "etf_signal_future_execution": {
+   "trades": 35,
+   "mean_r": 0.13407501893940998,
+   "win_rate": 0.4,
+   "total_r": 4.692625662879349,
+   "t_stat": 0.5846566737211186
+  },
+  "per_trade_r_corr_etf_vs_cross": 0.9957347313074355,
+  "stop_points_median": 137.65809991539456,
+  "one_MNQ_stop_usd_median": 275.3161998307891
+ },
+ "SPY->ES": {
+  "days": 50,
+  "first_day": 20260908,
+  "last_day": 20261116,
+  "price_ratio": {
+   "median": 10.089419744630614,
+   "min": 9.982455439282358,
+   "max": 10.129562616769089
+  },
+  "corr_5min_returns": 0.9667812059977644,
+  "signal_days_etf": 45,
+  "signal_days_future": 35,
+  "signal_days_both": 35,
+  "same_direction": 1.0,
+  "same_bar": 0.9142857142857143,
+  "bar_diff_median": 0.0,
+  "etf_own_signals": {
+   "trades": 45,
+   "mean_r": 0.12279170473065923,
+   "win_rate": 0.35555555555555557,
+   "total_r": 5.5256267128796654,
+   "t_stat": 0.5321660253044308
+  },
+  "etf_own_signals_same_days": {
+   "trades": 35,
+   "mean_r": 0.06927124442353179,
+   "win_rate": 0.34285714285714286,
+   "total_r": 2.424493554823613,
+   "t_stat": 0.26745629876546045
+  },
+  "future_own_signals": {
+   "trades": 35,
+   "mean_r": 0.05638446731376597,
+   "win_rate": 0.34285714285714286,
+   "total_r": 1.973456355981809,
+   "t_stat": 0.22365853015811726
+  },
+  "etf_signal_future_execution": {
+   "trades": 35,
+   "mean_r": -0.0726799267949216,
+   "win_rate": 0.3142857142857143,
+   "total_r": -2.5437974378222563,
+   "t_stat": -0.30698539843840855
+  },
+  "per_trade_r_corr_etf_vs_cross": 0.8483156974494647,
+  "stop_points_median": 21.921545995030062,
+  "one_MES_stop_usd_median": 109.6077299751503
+ }
+}

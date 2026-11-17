@@ -25,14 +25,16 @@ class FirmRules:
     lock_profit: float | None           # None = keeps trailing
     daily_loss_limit: float | None      # firm's daily limit (soft at the firms modelled), None = none
     max_contracts: int
+    profit_target: float | None = None  # evaluation target (None for funded accounts)
+    consistency: float | None = None    # best day must be <= this share of total profit to pass
 
 
 PRESETS: dict[str, FirmRules] = {
-    "topstep_combine_50k": FirmRules("Topstep 50K Trading Combine", 50000, 2000, "eod", 0.0, 1000, 50),
+    "topstep_combine_50k": FirmRules("Topstep 50K Trading Combine", 50000, 2000, "eod", 0.0, 1000, 50, 3000.0, 0.55),
     "topstep_xfa_50k": FirmRules("Topstep 50K Express Funded", 0, 2000, "eod", 0.0, 1000, 50),
-    "lucid_flex_50k_eval": FirmRules("LucidFlex 50K evaluation", 50000, 2000, "eod", 100.0, None, 40),
+    "lucid_flex_50k_eval": FirmRules("LucidFlex 50K evaluation", 50000, 2000, "eod", 100.0, None, 40, 3000.0, 0.40),
     "lucid_flex_50k_funded": FirmRules("LucidFlex 50K funded", 50000, 2000, "eod", 100.0, None, 40),
-    "tradeify_growth_50k_eval": FirmRules("Tradeify Growth 50K evaluation", 50000, 2000, "eod", None, 1250, 40),
+    "tradeify_growth_50k_eval": FirmRules("Tradeify Growth 50K evaluation", 50000, 2000, "eod", None, 1250, 40, 3000.0, None),
     "tradeify_growth_50k_funded": FirmRules("Tradeify Growth 50K funded", 50000, 2000, "eod", 100.0, 1250, 40),
 }
 
@@ -47,6 +49,7 @@ class AccountState:
     week_start_balance: float
     unrealized: float = 0.0
     fixed_floor: float | None = None      # e.g. Topstep sets the floor to $0 after a payout
+    best_day: float = 0.0                 # largest single-day profit (consistency rules)
     history: list = field(default_factory=list)
 
 
@@ -91,6 +94,7 @@ class AccountTracker:
             self._recompute_floor()
 
     def end_of_day(self, new_week: bool = False) -> None:
+        self.s.best_day = max(self.s.best_day, self.s.balance - self.s.day_start_balance)
         self.s.hwm_eod = max(self.s.hwm_eod, self.s.balance)
         self._recompute_floor()
         self.s.history.append({"balance": self.s.balance, "floor": self.s.floor})
@@ -114,6 +118,14 @@ class AccountTracker:
         return diff
 
     # ------------------------------------------------------------------ queries
+    def evaluation_passed(self) -> bool:
+        """Profit target reached and (if the firm has one) the consistency rule met."""
+        t = self.r.profit_target
+        if not t:
+            return False
+        profit = self.s.balance - self.r.starting_balance
+        return profit >= t and (self.r.consistency is None or self.s.best_day <= self.r.consistency * profit)
+
     @property
     def equity(self) -> float:
         return self.s.balance + self.s.unrealized

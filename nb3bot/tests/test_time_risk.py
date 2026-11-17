@@ -91,6 +91,15 @@ class AccountTests(unittest.TestCase):
         a.mark(-300)
         self.assertEqual(a.remaining_allowance(), 49700 - 48800)
 
+    def test_evaluation_pass_needs_target_and_consistency(self):
+        a = AccountTracker(PRESETS["topstep_combine_50k"])
+        a.realize(1800); a.end_of_day()                  # one big day
+        a.realize(1300); a.end_of_day()
+        self.assertFalse(a.evaluation_passed())         # 1800 > 55% of 3100
+        a.realize(300); a.end_of_day()
+        self.assertTrue(a.evaluation_passed())          # 1800 <= 55% of 3400
+        self.assertFalse(AccountTracker(PRESETS["topstep_xfa_50k"]).evaluation_passed())
+
     def test_topstep_payout_moves_floor_to_zero(self):
         a = AccountTracker(PRESETS["topstep_xfa_50k"])
         a.realize(3000); a.end_of_day()

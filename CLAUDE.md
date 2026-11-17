@@ -47,9 +47,15 @@ Example structure:
 ### Current Structure
 ```
 GitHub/
-├── .git/              # Git version control metadata
+├── *.pine            # TradingView Pine v6 indicators/strategies (NB3 V2: nb3_breakout_v2_*.pine)
+├── backtest/         # Research: data loaders, grid tests, NB3 verification, prop-firm simulator
+├── tests/            # Research unit tests (Pine mirror engines)
+├── nb3bot/           # Automated NB3 V2 futures bot (see nb3bot/README.md); tests in nb3bot/tests
+├── docs/             # Research write-up; docs/bot/ = install guide, operating manual, validation
 └── CLAUDE.md         # This file
 ```
+Bot tests: `python -m unittest discover -s nb3bot/tests -t .` (the 675-trade parity test needs the
+QQQ research cache via NB3_QQQ_DATA). Live order sending must stay disabled in shipped configs.
 
 ### Planned Structure
 *Document the intended directory structure as it develops*

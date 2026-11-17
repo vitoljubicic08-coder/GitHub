@@ -26,7 +26,7 @@ The researched NB3 V2 strategy as a working, automated trading system:
 | `app.py` | The runtime loop that ties everything together. |
 | `dashboard/` | Local web dashboard with New York and Zagreb time, risk checks, account room, trades, alerts and a kill button. |
 | `replay/` | Historical replay, the automated parity check, and simulated-live runs of the whole stack. |
-| `tests/` | 57 automated tests, including the 675-trade parity and full-stack replays. |
+| `tests/` | 58 automated tests, including the 675-trade parity and full-stack replays. |
 
 ## Quick start
 

@@ -55,8 +55,8 @@ class RiskCfg:
     max_contracts: int = 1                # hard cap; start with one MNQ
     max_daily_loss: float = 400.0         # personal limit (stricter than the firm's)
     max_weekly_loss: float = 800.0
-    max_total_drawdown: float = 1500.0    # from the account's high-water mark
-    safety_reserve: float = 500.0         # must remain above the firm loss limit after the worst case
+    max_total_drawdown: float = 2000.0    # from the account's high-water mark (= the firm's limit by default)
+    safety_reserve: float = 100.0         # must remain above the firm loss limit after the worst case
     halt_after_consecutive_losses: int = 0  # 0 = off (not part of the tested strategy)
     edge_stop_rules: bool = True          # pre-registered stop rules from the research report
 

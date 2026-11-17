@@ -57,7 +57,33 @@ Settings:
 - **Sizing:** one MNQ, $350 evaluation budget, $1.22 commission, 1 tick of slippage.
 - **Prices:** MNQ synthesised as QQQ × 41.3, because no 2025 MNQ minute data was available.
 
-Results are in `nb3bot/validation/replay_2025H1_mnq/` (see section 6).
+Results are in `nb3bot/validation/replay_2025H1_mnq/`: the trade journal, a performance summary and the full audit log.
+
+**Overall: 122 sessions, 106 signals, 89 trades, +$2,866 (+0.155R per trade, 47% winners), worst drawdown $1,884.**
+
+| Month | Trades | P&L |
+|---|---|---|
+| 2025-01 | 17 | +$236 |
+| 2025-02 | 17 | +$1,890 |
+| 2025-03 | 18 | +$2,117 |
+| 2025-04 | 5 | −$366 |
+| 2025-05 | 16 | −$140 |
+| 2025-06 | 16 | −$871 |
+
+Why 17 signals were not traded:
+
+- **15 by size:** in the April 2025 volatility, one MNQ risked more than $350.
+- **2 by the personal weekly loss limit.**
+
+**The evaluation target and the 55% consistency rule were met on 2025-03-17,** 51 trading days in, close to the simulated median of about 42. The bot now halts at that point and tells you to switch to the funded configuration.
+
+**What an earlier run with stricter defaults showed.** With a $500 reserve and a $1,500 personal drawdown cap, the bot stopped trading for good after the normal March–April drawdown: 30 signals were blocked, and it would never have resumed. That is why those two limits now halt explicitly with an alert, and why their defaults ($100 reserve, $2,000 drawdown) no longer silently end an evaluation the research expected to continue.
+
+**This run does not measure the edge.**
+
+- The six months were used to test the machinery.
+- The MNQ prices are synthetic (QQQ × 41.3).
+- 89 trades is a small sample: the 95% range of the mean is about −0.14R to +0.45R.
 
 ## 5. Funded risk: resolving the "$250 budget vs ~$275 per MNQ" conflict
 

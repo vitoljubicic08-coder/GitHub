@@ -368,6 +368,13 @@ class Bot:
                        risk_per_contract=round(sizing.risk_per_contract, 2), worst_case=round(sizing.worst_case_loss, 2))
         if es == "stop":
             self.mgr.halt(f"edge stop rule: {ed}")
+        failed = {n for n, ok, _ in dec.checks if not ok}
+        # these two cannot clear by themselves (the account only changes by trading): halt and ask the operator
+        for name, why in (("loss_limit_headroom", "account too close to the firm's loss limit for another worst-case loss"),
+                          ("personal_drawdown", "personal maximum drawdown reached")):
+            if name in failed:
+                self.mgr.halt(f"{why}: entries stopped until you decide (reset the account, or adjust limits) "
+                              f"and run clear-halts")
         if not dec.allowed:
             tag = f"SKIP-{sig['session']}"
             if self.store.create_intent(tag, sig["session"], {"signal": sig, "reasons": dec.reasons}):
@@ -396,6 +403,10 @@ class Bot:
         nxt = self.cal.next_trading_day(key_date(day.key))
         self.account.end_of_day(new_week=nxt.isocalendar()[1] != key_date(day.key).isocalendar()[1])
         self.store.put("account", self.account.snapshot())
+        if self.cfg.risk.phase == "evaluation" and self.account.evaluation_passed():
+            self.mgr.halt(f"evaluation target reached (balance ${self.account.s.balance:,.2f}, best day "
+                          f"${self.account.s.best_day:,.2f}): the firm should now move you to the funded account. "
+                          f"Set risk.phase = funded and the funded account preset, then clear-halts", "INFO")
         day.eod_done = True
         self.audit.log("session_end", session=day.key, history_source=source, bars=len(final.bars),
                        balance=round(self.account.s.balance, 2), floor=round(self.account.s.floor, 2),

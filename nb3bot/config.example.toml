@@ -37,8 +37,10 @@ funded_risk_per_trade = 250.0       # research optimum: skips days when one MNQ 
 max_contracts = 1              # start with ONE contract
 max_daily_loss = 400.0         # personal limits, stricter than the firm's
 max_weekly_loss = 800.0
-max_total_drawdown = 1500.0
-safety_reserve = 500.0         # keep at least this above the firm loss limit after a worst-case loss
+max_total_drawdown = 2000.0    # from the high-water mark; equal to the firm limit by default
+safety_reserve = 100.0         # keep at least this above the firm loss limit after a worst-case loss.
+                               # Larger values stop an evaluation earlier (it can no longer recover);
+                               # the bot then HALTS and tells you, instead of skipping silently.
 halt_after_consecutive_losses = 0   # 0 = off (not part of the tested strategy)
 edge_stop_rules = true         # pre-registered stop rules (50/100/200-trade checks)
 

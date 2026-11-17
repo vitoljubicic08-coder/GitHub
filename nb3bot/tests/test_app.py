@@ -95,14 +95,16 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("size", failed)
 
     def test_loss_limit_headroom_blocks_entry(self):
+        cfg = replace(self.cfg, risk=replace(self.cfg.risk, max_daily_loss=1e9, max_weekly_loss=1e9, max_total_drawdown=1e9))
         ss = synthetic(at_minute=22, move=6.0)
-        rig = build(self.cfg, ss, ss[14].key, self.dir)
-        rig.bot.account.realize(-1700)              # $300 above the $48,000 floor
+        rig = build(cfg, ss, ss[14].key, self.dir)
+        rig.bot.account.realize(-1900)              # $100 above the $48,000 floor: less than worst case + reserve
         rig.broker.balance = rig.bot.account.s.balance
         run_day(rig, ss[14].key)
         self.assertEqual(rig.store.trades(), [])
         failed = [c["check"] for c in rig.bot.day.decision["checks"] if not c["ok"]]
         self.assertIn("loss_limit_headroom", failed)
+        self.assertTrue(any("too close to the firm's loss limit" in h for h in rig.bot.mgr.halt_reasons))   # explicit halt
 
 
 class RealDataEndToEnd(unittest.TestCase):

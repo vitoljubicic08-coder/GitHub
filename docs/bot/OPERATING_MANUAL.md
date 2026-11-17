@@ -134,7 +134,22 @@ These limits were fixed before trading. Don't change them after a bad week.
   - Details are in [VALIDATION.md](VALIDATION.md).
 - **Never** raise the risk to win back losses, and **don't** increase `max_contracts` above 1 until the paper and practice stages pass.
 
-## 10. Files the bot creates
+## 10. Personal risk limits (and why they can stop an evaluation for good)
+
+| Setting | Default | What happens when it is reached |
+|---|---|---|
+| `max_contracts` | 1 | Hard cap on size. |
+| `evaluation_risk_per_trade` / `funded_risk_per_trade` | $350 / $250 | The trade is skipped that day if one contract costs more. |
+| `max_daily_loss` | $400 | No more entries today (resets tomorrow). |
+| `max_weekly_loss` | $800 | No more entries this week (resets Monday). |
+| `max_total_drawdown` | $2,000 | From the account's high point. **HALT** with an alert. |
+| `safety_reserve` | $100 | Must remain above the firm's loss limit after a worst-case loss. **HALT** with an alert. |
+
+**Why the last two halt instead of skipping.** A prop account only changes when the bot trades. Once the account is too close to its limit, it would skip every future signal, so the evaluation could neither pass nor fail. The bot therefore halts and tells you. You then decide: reset or replace the evaluation, or accept that this attempt is over.
+
+**Why the defaults are not stricter.** The research simulations traded until the firm's own limit was hit. In an earlier replay with a $500 reserve and a $1,500 drawdown cap, the bot stopped for good after a normal losing stretch in March 2025. It missed the rest of the half-year: 30 signals were blocked. With a prop account your own money is never at risk beyond the fees, so a large reserve does not save money. It just ends the attempt earlier. The reserve exists to absorb slippage beyond the planned worst case.
+
+## 11. Files the bot creates
 
 | Path | What it is |
 |---|---|

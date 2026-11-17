@@ -47,7 +47,8 @@ def build(cfg, sessions: list[Session], start_key: int, workdir: str | Path, mnq
     alerts: list = []
     alerter = Alerter(cfg.alerts, audit, sender=lambda lvl, txt: alerts.append((lvl, txt)))
     sig_src = ReplayMinutes("replay:QQQ", sessions, clock)
-    exe_src = ReplayMinutes("replay:MNQ", mnq_sessions or sessions, clock, scale=1.0 if mnq_sessions else ratio)
+    exe_src = ReplayMinutes("replay:MNQ", mnq_sessions or sessions, clock, scale=1.0 if mnq_sessions else ratio,
+                            tick=cfg.instrument.tick_size)
     c = ContractInfo("SIM.MNQ", "MNQ (synthetic QQQ x ratio)" if not mnq_sessions else "MNQ (replay)",
                      cfg.instrument.tick_size, cfg.instrument.tick_value, True)
     broker = PaperBroker(c, 0.0, slip_ticks=cfg.costs.slippage_ticks_per_side,

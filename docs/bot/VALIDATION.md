@@ -82,7 +82,7 @@ Why 17 signals were not traded:
 **This run does not measure the edge.**
 
 - The six months were used to test the machinery.
-- The MNQ prices are synthetic (QQQ × 41.3).
+- The MNQ prices are synthetic (QQQ × 41.3) and were not yet rounded to 0.25 ticks in this run. Replays now round them; the effect is under a tick per fill.
 - 89 trades is a small sample: the 95% range of the mean is about −0.14R to +0.45R.
 
 ## 5. Funded risk: resolving the "$250 budget vs ~$275 per MNQ" conflict

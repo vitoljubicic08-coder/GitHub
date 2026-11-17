@@ -87,11 +87,12 @@ class ProjectXMinutes:
 class ReplayMinutes:
     """Serves historical sessions as if live: only bars that have finished by the clock's time."""
 
-    def __init__(self, name: str, sessions: list[Session], clock, scale: float = 1.0):
+    def __init__(self, name: str, sessions: list[Session], clock, scale: float = 1.0, tick: float | None = None):
         self.name = name
         self.realtime = True
         self.clock = clock
         self.scale = scale             # multiply prices (e.g. QQQ x 41.3 = synthetic MNQ for paper fills)
+        self.tick = tick if scale != 1.0 else None   # synthetic prices are put on the contract's tick grid
         self.by_key = {s.key: s for s in sessions}
 
     def fetch(self, start: datetime, end: datetime) -> list[MinuteBar]:
@@ -105,7 +106,10 @@ class ReplayMinutes:
                 for m, o, h, l, c, v in s.minutes():
                     ts = minute_start(s.key, m)
                     if start <= ts < end and ts + timedelta(minutes=1) <= now:
-                        k = self.scale
-                        out.append(MinuteBar(ts, o * k, h * k, l * k, c * k, v))
+                        k, tk = self.scale, self.tick
+                        r = (lambda x: round(x * k / tk) * tk) if tk else (lambda x: x * k)
+                        lo, hi = r(l), r(h)
+                        oo, cc = min(max(r(o), lo), hi), min(max(r(c), lo), hi)
+                        out.append(MinuteBar(ts, oo, hi, lo, cc, v))
             d += timedelta(days=1)
         return out

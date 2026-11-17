@@ -51,3 +51,12 @@ $1.50 per round turn):
 * **Edge haircut:** the "half edge" case subtracts a constant from every trade's R.
 * **Comparison:** against round 5's steady setting under the same model, on 2023-26 with the full
   and half edge.
+
+## Outcome (added after the check; details in RESULTS_7.md)
+
+* **Pick Q** (band 1.5, gap-adjusted, QQQ): design Sharpe 1.45 vs 0.85, but **check 1.10 vs NB3
+  V2's 1.96. Not improved.**
+* **Pick P** (portfolio, band 1.5, half-hour checks): check 0.60 vs NB3 V2 portfolio 0.96. **Not
+  improved.**
+* **SPY, IWM and DIA** add no reliable edge.
+* **Stage 2** was not run, because no pick passed.

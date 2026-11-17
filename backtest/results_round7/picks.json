@@ -1,0 +1,41 @@
+{
+ "P_portfolio": {
+  "rule": "{\"check30\": true, \"exit\": [\"bracket\", 0.3, 3.0], \"gap\": false, \"k\": 1.5, \"mt\": 1, \"regime\": false}",
+  "QQQ_sharpe": 1.1078081628534642,
+  "QQQ_mean_day_r": 0.06856218001354844,
+  "QQQ_t": 2.9293228719824795,
+  "QQQ_years_positive": 5,
+  "PORTFOLIO_sharpe": 0.583601711725852,
+  "PORTFOLIO_mean_day_r": 0.10777561787579243,
+  "PORTFOLIO_t": 1.5431894253994556,
+  "PORTFOLIO_years_positive": 5,
+  "QQQ_trades": 934,
+  "QQQ_mean_trade_r": 0.12934321325896397
+ },
+ "Q_qqq": {
+  "rule": "{\"check30\": false, \"exit\": [\"bracket\", 0.3, 3.0], \"gap\": true, \"k\": 1.5, \"mt\": 1, \"regime\": false}",
+  "QQQ_sharpe": 1.4484142509263584,
+  "QQQ_mean_day_r": 0.09145507311875892,
+  "QQQ_t": 3.829970870060451,
+  "QQQ_years_positive": 7,
+  "PORTFOLIO_sharpe": 0.6032668791614036,
+  "PORTFOLIO_mean_day_r": 0.10816887507603941,
+  "PORTFOLIO_t": 1.5951890645806177,
+  "PORTFOLIO_years_positive": 4,
+  "QQQ_trades": 876,
+  "QQQ_mean_trade_r": 0.18395415392152192
+ },
+ "NB3_baseline": {
+  "rule": "{\"check30\": false, \"exit\": [\"bracket\", 0.3, 3.0], \"gap\": false, \"k\": 1.0, \"mt\": 1, \"regime\": false}",
+  "QQQ_sharpe": 0.853305742503317,
+  "QQQ_mean_day_r": 0.07088549367294526,
+  "QQQ_t": 2.25635458568073,
+  "QQQ_years_positive": 6,
+  "PORTFOLIO_sharpe": 0.1152976981231946,
+  "PORTFOLIO_mean_day_r": 0.028145547494226812,
+  "PORTFOLIO_t": 0.30487605663534056,
+  "PORTFOLIO_years_positive": 4,
+  "QQQ_trades": 1591,
+  "QQQ_mean_trade_r": 0.07850423623615935
+ }
+}

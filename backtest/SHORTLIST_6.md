@@ -53,3 +53,18 @@ Part 2b of round 5).
   * extra: no edge.
 * **Reported:** payout within 1 / 3 / 6 / 12 months, mean and median cash at 6 and 12 months, and
   the chance of being ahead.
+
+## Outcome (added after the runs; details in RESULTS_6.md)
+
+* **Design:** 4,014 of 25,088 settings had positive 12-month cash. Every pick uses market entries
+  with a 0.1 ATR stop, one trade a day and large size.
+  * A: 1R, $1,000 / $500, keep $0.
+  * B: 2R, $500 / $500, keep $500.
+  * C: 1.5R, $700 / $500, keep $0.
+* **Check, 2023-26, paid within 3 months:**
+  * A 55%, B 45%, C 51%;
+  * vs 11% for round 5's setting and 1% for the current bot.
+* **Check, ahead after 12 months:**
+  * B 55% (mean +$1,424, median +$153);
+  * round 5 73% (median +$676).
+* **Pullback ("top/bottom") limit entries and breakeven stops did not help.**

@@ -58,12 +58,12 @@ BASELINES = {
 _D: dict = {}
 
 
-def pool6(d: dict, span, v: Variant) -> dict:
+def pool6(d: dict, span, v: Variant, slip_ticks: float = 1.0) -> dict:
     """Day pool of the variant's MNQ trades, dollar risk rescaled to today's volatility (round 5, Part 2b)."""
     dd = lab4.subset(d, *span)
     sig = lab6.nb3_signals(dd, v.mt)
     t = lab6.bracket6(dd, sig, v.rr, v.stop, entry=v.entry, offset=v.offset, be=v.be, max_trades=v.mt,
-                      slip=ps.MNQ_TICK_Q, commission=0.0)
+                      slip=slip_ticks * ps.MNQ_TICK_Q, commission=0.0, tick=ps.MNQ_TICK_Q)
     pool = lc.pool_from_trades(dd, t)
     key = ("scale",) + tuple(span)
     if key not in _D:

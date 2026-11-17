@@ -1,0 +1,298 @@
+{
+ "verdict_2016_2023": "weak",
+ "sessions_per_year": {
+  "2016": 252,
+  "2017": 251,
+  "2018": 251,
+  "2019": 252,
+  "2020": 253,
+  "2021": 252,
+  "2022": 251,
+  "2023": 250,
+  "2024": 252,
+  "2025": 250,
+  "2026": 61
+ },
+ "rows": [
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2016",
+   "n": 213,
+   "win": 0.3803,
+   "target_hit": 0.0939,
+   "avg_r": -0.0079,
+   "t": -0.08,
+   "pf": 0.987
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2017",
+   "n": 232,
+   "win": 0.375,
+   "target_hit": 0.0905,
+   "avg_r": -0.1014,
+   "t": -1.16,
+   "pf": 0.836
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2018",
+   "n": 225,
+   "win": 0.4178,
+   "target_hit": 0.1511,
+   "avg_r": 0.1673,
+   "t": 1.64,
+   "pf": 1.303
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2019",
+   "n": 225,
+   "win": 0.4356,
+   "target_hit": 0.0711,
+   "avg_r": 0.0469,
+   "t": 0.56,
+   "pf": 1.095
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2020",
+   "n": 231,
+   "win": 0.4026,
+   "target_hit": 0.0779,
+   "avg_r": 0.056,
+   "t": 0.63,
+   "pf": 1.103
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2021",
+   "n": 228,
+   "win": 0.4035,
+   "target_hit": 0.0877,
+   "avg_r": 0.0922,
+   "t": 0.99,
+   "pf": 1.163
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2022",
+   "n": 237,
+   "win": 0.4219,
+   "target_hit": 0.0802,
+   "avg_r": 0.1077,
+   "t": 1.18,
+   "pf": 1.193
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2023",
+   "n": 231,
+   "win": 0.4199,
+   "target_hit": 0.0779,
+   "avg_r": 0.0896,
+   "t": 0.97,
+   "pf": 1.158
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2024",
+   "n": 226,
+   "win": 0.4248,
+   "target_hit": 0.1195,
+   "avg_r": 0.1778,
+   "t": 1.85,
+   "pf": 1.337
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2025",
+   "n": 211,
+   "win": 0.4834,
+   "target_hit": 0.1043,
+   "avg_r": 0.2241,
+   "t": 2.36,
+   "pf": 1.48
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "2026",
+   "n": 57,
+   "win": 0.4737,
+   "target_hit": 0.1579,
+   "avg_r": 0.3693,
+   "t": 1.83,
+   "pf": 1.797
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "NEW 2016-01..2023-02",
+   "n": 1629,
+   "win": 0.4045,
+   "target_hit": 0.0927,
+   "avg_r": 0.0494,
+   "t": 1.44,
+   "pf": 1.088
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "known 2023-03..2026-03",
+   "n": 687,
+   "win": 0.4483,
+   "target_hit": 0.1063,
+   "avg_r": 0.191,
+   "t": 3.52,
+   "pf": 1.373
+  },
+  {
+   "costs": "research costs (2 x $0.01 + $0.005/share)",
+   "period": "all",
+   "n": 2316,
+   "win": 0.4175,
+   "target_hit": 0.0967,
+   "avg_r": 0.0914,
+   "t": 3.15,
+   "pf": 1.167
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2016",
+   "n": 213,
+   "win": 0.3991,
+   "target_hit": 0.1033,
+   "avg_r": 0.0627,
+   "t": 0.66,
+   "pf": 1.114
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2017",
+   "n": 232,
+   "win": 0.3922,
+   "target_hit": 0.0905,
+   "avg_r": -0.0564,
+   "t": -0.65,
+   "pf": 0.905
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2018",
+   "n": 225,
+   "win": 0.4222,
+   "target_hit": 0.1511,
+   "avg_r": 0.188,
+   "t": 1.85,
+   "pf": 1.347
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2019",
+   "n": 225,
+   "win": 0.4356,
+   "target_hit": 0.0756,
+   "avg_r": 0.0658,
+   "t": 0.78,
+   "pf": 1.135
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2020",
+   "n": 231,
+   "win": 0.4069,
+   "target_hit": 0.0823,
+   "avg_r": 0.0801,
+   "t": 0.89,
+   "pf": 1.149
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2021",
+   "n": 228,
+   "win": 0.4035,
+   "target_hit": 0.0877,
+   "avg_r": 0.0988,
+   "t": 1.06,
+   "pf": 1.176
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2022",
+   "n": 237,
+   "win": 0.4219,
+   "target_hit": 0.0802,
+   "avg_r": 0.1117,
+   "t": 1.23,
+   "pf": 1.201
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2023",
+   "n": 231,
+   "win": 0.4242,
+   "target_hit": 0.0779,
+   "avg_r": 0.0995,
+   "t": 1.08,
+   "pf": 1.178
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2024",
+   "n": 226,
+   "win": 0.4248,
+   "target_hit": 0.1195,
+   "avg_r": 0.1847,
+   "t": 1.92,
+   "pf": 1.353
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2025",
+   "n": 211,
+   "win": 0.4834,
+   "target_hit": 0.1043,
+   "avg_r": 0.2285,
+   "t": 2.41,
+   "pf": 1.491
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "2026",
+   "n": 57,
+   "win": 0.4737,
+   "target_hit": 0.1579,
+   "avg_r": 0.3727,
+   "t": 1.85,
+   "pf": 1.807
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "NEW 2016-01..2023-02",
+   "n": 1629,
+   "win": 0.4107,
+   "target_hit": 0.0952,
+   "avg_r": 0.0756,
+   "t": 2.2,
+   "pf": 1.138
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "known 2023-03..2026-03",
+   "n": 687,
+   "win": 0.4498,
+   "target_hit": 0.1063,
+   "avg_r": 0.1979,
+   "t": 3.65,
+   "pf": 1.389
+  },
+  {
+   "costs": "MNQ costs (1 tick, $1.50 per round turn charged on 1 contract)",
+   "period": "all",
+   "n": 2316,
+   "win": 0.4223,
+   "target_hit": 0.0984,
+   "avg_r": 0.1119,
+   "t": 3.85,
+   "pf": 1.209
+  }
+ ]
+}

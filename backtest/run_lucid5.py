@@ -37,7 +37,21 @@ FUND_SIZES = [("budget", float(x)) for x in (150, 250, 350, 500)] + [("cush", f)
 KEEPS = (0.0, 500.0, 1000.0, 2000.0)
 N, H, BLOCK, SEED = 2000, 252, 10, 20261117
 BASELINE = lc.Config(0.3, 3.0, 1, ("budget", 350.0), ("budget", 250.0), 2000.0)
-_D: dict = {}
+NOW_ONE_MNQ = 275.3          # one MNQ at a 0.3-ATR stop, real NQ data Sep-Nov 2026 (Part 2b)
+_D: dict = {"now": False}
+
+
+def pool_for(d, span, stop, rr, mt, now):
+    """build_pool; with `now`, dollar risk rescaled so the span's median 0.3-ATR one-MNQ risk = $275.3."""
+    pool = lc.build_pool(d, *span, stop, rr, mt)
+    if now:
+        key = ("scale",) + tuple(span)
+        if key not in _D:
+            ref = lc.build_pool(d, *span, 0.3, 3.0, 1)
+            _D[key] = NOW_ONE_MNQ / float(np.median(ref["dpr1"][ref["has1"]]))
+        for j in (1, 2):
+            pool[f"dpr{j}"] = pool[f"dpr{j}"] * _D[key]
+    return pool
 
 
 def load(inst: str) -> dict:
@@ -80,13 +94,13 @@ def part1(d: dict) -> None:
 
 
 # ----------------------------------------------------------------------------- Part 2
-def _init(inst):
-    _D["d"] = load(inst)
+def _init(inst, now):
+    _D["d"], _D["now"] = load(inst), now
 
 
 def design_job(ex):
     stop, rr, mt = ex
-    pool = lc.build_pool(_D["d"], *DESIGN, stop, rr, mt)
+    pool = pool_for(_D["d"], DESIGN, stop, rr, mt, _D["now"])
     st = lc.streams(pool, N, H, BLOCK, SEED)
     rows = []
     for es in EVAL_SIZES:
@@ -109,15 +123,16 @@ def row_cfg(r):
     return lc.Config(float(r["stop"]), float(r["rr"]), int(r["mt"]), sz(r["eval_size"]), sz(r["funded_size"]), float(r["keep"]))
 
 
-def design(inst: str) -> None:
+def design(inst: str, now: bool = False) -> None:
     t0 = time.time()
     OUT.mkdir(exist_ok=True)
+    sfx = "_now" if now else ""
     rows = []
-    with Pool(4, initializer=_init, initargs=(inst,)) as p:
+    with Pool(4, initializer=_init, initargs=(inst, now)) as p:
         for i, part in enumerate(p.imap_unordered(design_job, EXITS)):
             rows += part
             print(f"exit variants {i + 1}/{len(EXITS)} ({time.time() - t0:.0f}s)", flush=True)
-    with open(OUT / "design_grid.csv", "w", newline="") as f:
+    with open(OUT / f"design_grid{sfx}.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader(); w.writerows(rows)
     best = max(rows, key=lambda r: (r["payout_12m"], r["net_mean"]))
@@ -126,17 +141,19 @@ def design(inst: str) -> None:
     bal = max(near, key=lambda r: r["net_mean"])
     base = next(r for r in rows if row_cfg(r) == BASELINE)
     picks = {"1_max_payout_chance": best, "2_max_expected_cash": money, "3_balanced": bal, "baseline_bot": base}
-    (OUT / "picks.json").write_text(json.dumps(picks, indent=1))
+    (OUT / f"picks{sfx}.json").write_text(json.dumps(picks, indent=1))
     for k, r in picks.items():
         print(k, json.dumps(r))
 
 
-def check(inst: str) -> None:
+def check(inst: str, now: bool = False) -> None:
     d = load(inst)
-    picks = json.loads((OUT / "picks.json").read_text())
+    sfx = "_now" if now else ""
+    picks = json.loads((OUT / f"picks{sfx}.json").read_text())
     out, lines = {}, []
     cases = [("check 2023-26, full edge", CHECK, 1.0, H), ("check 2023-26, half edge", CHECK, 0.5, H),
-             ("design 2016-22, half edge", DESIGN, 0.5, H), ("check 2023-26, full edge, 24 months (extra)", CHECK, 1.0, 2 * H)]
+             ("design 2016-22, half edge", DESIGN, 0.5, H), ("check 2023-26, full edge, 24 months (extra)", CHECK, 1.0, 2 * H),
+             ("design 2016-22, no edge (extra: the luck share)", DESIGN, 0.0, H)]
     pools = {}
     for name, r in picks.items():
         cfg = row_cfg(r)
@@ -145,24 +162,24 @@ def check(inst: str) -> None:
         for label, span, keep, hz in cases:
             pk = key + span
             if pk not in pools:
-                pools[pk] = lc.build_pool(d, *span, *key)
+                pools[pk] = pool_for(d, span, *key, now)
             st = lc.streams(pools[pk], N, hz, BLOCK, SEED + 1, edge_keep=keep)
             out[name][label] = lc.metrics(lc.simulate(pools[pk], st, cfg))
-    (OUT / "check.json").write_text(json.dumps(out, indent=1))
+    (OUT / f"check{sfx}.json").write_text(json.dumps(out, indent=1))
     print(json.dumps(out, indent=1))
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--inst", required=True)
-    ap.add_argument("stage", choices=("nb3", "design", "check"))
+    ap.add_argument("stage", choices=("nb3", "design", "check", "design_now", "check_now"))
     a = ap.parse_args()
     if a.stage == "nb3":
         part1(load(a.inst))
-    elif a.stage == "design":
-        design(a.inst)
+    elif a.stage in ("design", "design_now"):
+        design(a.inst, a.stage.endswith("_now"))
     else:
-        check(a.inst)
+        check(a.inst, a.stage.endswith("_now"))
 
 
 if __name__ == "__main__":

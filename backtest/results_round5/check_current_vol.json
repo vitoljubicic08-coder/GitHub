@@ -1,0 +1,355 @@
+{
+ "scale": 1.7807420224093167,
+ "1_max_payout_chance | literal | edge 1.0": {
+  "pass": 0.0,
+  "days_to_pass_med": NaN,
+  "payout_6m": 0.0,
+  "payout_12m": 0.0,
+  "payout_any": 0.0,
+  "days_to_first_payout_med": NaN,
+  "payouts_mean": 0.0,
+  "net_mean": -130.0,
+  "net_median": -130.0,
+  "p_profit": 0.0,
+  "blown_after_pass": NaN,
+  "moved_live": 0.0,
+  "eval_size": [
+   "budget",
+   250.0
+  ],
+  "funded_size": [
+   "budget",
+   250.0
+  ]
+ },
+ "1_max_payout_chance | literal | edge 0.5": {
+  "pass": 0.0,
+  "days_to_pass_med": NaN,
+  "payout_6m": 0.0,
+  "payout_12m": 0.0,
+  "payout_any": 0.0,
+  "days_to_first_payout_med": NaN,
+  "payouts_mean": 0.0,
+  "net_mean": -130.0,
+  "net_median": -130.0,
+  "p_profit": 0.0,
+  "blown_after_pass": NaN,
+  "moved_live": 0.0,
+  "eval_size": [
+   "budget",
+   250.0
+  ],
+  "funded_size": [
+   "budget",
+   250.0
+  ]
+ },
+ "1_max_payout_chance | scaled | edge 1.0": {
+  "pass": 0.5545,
+  "days_to_pass_med": 49.0,
+  "payout_6m": 0.3565,
+  "payout_12m": 0.405,
+  "payout_any": 0.405,
+  "days_to_first_payout_med": 72.0,
+  "payouts_mean": 0.8495,
+  "net_mean": 621.2763352689781,
+  "net_median": -130.0,
+  "p_profit": 0.405,
+  "blown_after_pass": 0.8935978358881875,
+  "moved_live": 0.057,
+  "eval_size": [
+   "budget",
+   445.18550560232916
+  ],
+  "funded_size": [
+   "budget",
+   445.18550560232916
+  ]
+ },
+ "1_max_payout_chance | scaled | edge 0.5": {
+  "pass": 0.4075,
+  "days_to_pass_med": 53.0,
+  "payout_6m": 0.2245,
+  "payout_12m": 0.2625,
+  "payout_any": 0.2625,
+  "days_to_first_payout_med": 77.0,
+  "payouts_mean": 0.4815,
+  "net_mean": 261.75764803293384,
+  "net_median": -130.0,
+  "p_profit": 0.2625,
+  "blown_after_pass": 0.939877300613497,
+  "moved_live": 0.023,
+  "eval_size": [
+   "budget",
+   445.18550560232916
+  ],
+  "funded_size": [
+   "budget",
+   445.18550560232916
+  ]
+ },
+ "2_max_expected_cash | literal | edge 1.0": {
+  "pass": 0.0,
+  "days_to_pass_med": NaN,
+  "payout_6m": 0.0,
+  "payout_12m": 0.0,
+  "payout_any": 0.0,
+  "days_to_first_payout_med": NaN,
+  "payouts_mean": 0.0,
+  "net_mean": -130.0,
+  "net_median": -130.0,
+  "p_profit": 0.0,
+  "blown_after_pass": NaN,
+  "moved_live": 0.0,
+  "eval_size": [
+   "budget",
+   250.0
+  ],
+  "funded_size": [
+   "budget",
+   350.0
+  ]
+ },
+ "2_max_expected_cash | literal | edge 0.5": {
+  "pass": 0.0,
+  "days_to_pass_med": NaN,
+  "payout_6m": 0.0,
+  "payout_12m": 0.0,
+  "payout_any": 0.0,
+  "days_to_first_payout_med": NaN,
+  "payouts_mean": 0.0,
+  "net_mean": -130.0,
+  "net_median": -130.0,
+  "p_profit": 0.0,
+  "blown_after_pass": NaN,
+  "moved_live": 0.0,
+  "eval_size": [
+   "budget",
+   250.0
+  ],
+  "funded_size": [
+   "budget",
+   350.0
+  ]
+ },
+ "2_max_expected_cash | scaled | edge 1.0": {
+  "pass": 0.5545,
+  "days_to_pass_med": 49.0,
+  "payout_6m": 0.2355,
+  "payout_12m": 0.2575,
+  "payout_any": 0.2575,
+  "days_to_first_payout_med": 68.0,
+  "payouts_mean": 0.7445,
+  "net_mean": 708.3010744230214,
+  "net_median": -130.0,
+  "p_profit": 0.2575,
+  "blown_after_pass": 0.8593327321911632,
+  "moved_live": 0.077,
+  "eval_size": [
+   "budget",
+   445.18550560232916
+  ],
+  "funded_size": [
+   "budget",
+   623.2597078432608
+  ]
+ },
+ "2_max_expected_cash | scaled | edge 0.5": {
+  "pass": 0.4075,
+  "days_to_pass_med": 53.0,
+  "payout_6m": 0.1335,
+  "payout_12m": 0.1485,
+  "payout_any": 0.1485,
+  "days_to_first_payout_med": 69.0,
+  "payouts_mean": 0.3755,
+  "net_mean": 273.8569502607571,
+  "net_median": -130.0,
+  "p_profit": 0.1485,
+  "blown_after_pass": 0.9337423312883436,
+  "moved_live": 0.026,
+  "eval_size": [
+   "budget",
+   445.18550560232916
+  ],
+  "funded_size": [
+   "budget",
+   623.2597078432608
+  ]
+ },
+ "3_balanced | literal | edge 1.0": {
+  "pass": 0.564,
+  "days_to_pass_med": 132.0,
+  "payout_6m": 0.087,
+  "payout_12m": 0.335,
+  "payout_any": 0.335,
+  "days_to_first_payout_med": 163.0,
+  "payouts_mean": 0.576,
+  "net_mean": 302.04187284484925,
+  "net_median": -130.0,
+  "p_profit": 0.335,
+  "blown_after_pass": 0.38652482269503546,
+  "moved_live": 0.011,
+  "eval_size": [
+   "budget",
+   250.0
+  ],
+  "funded_size": [
+   "budget",
+   250.0
+  ]
+ },
+ "3_balanced | literal | edge 0.5": {
+  "pass": 0.341,
+  "days_to_pass_med": 137.0,
+  "payout_6m": 0.0385,
+  "payout_12m": 0.147,
+  "payout_any": 0.147,
+  "days_to_first_payout_med": 170.0,
+  "payouts_mean": 0.226,
+  "net_mean": 29.816493131745926,
+  "net_median": -130.0,
+  "p_profit": 0.147,
+  "blown_after_pass": 0.4032258064516129,
+  "moved_live": 0.0025,
+  "eval_size": [
+   "budget",
+   250.0
+  ],
+  "funded_size": [
+   "budget",
+   250.0
+  ]
+ },
+ "3_balanced | scaled | edge 1.0": {
+  "pass": 0.605,
+  "days_to_pass_med": 32.0,
+  "payout_6m": 0.445,
+  "payout_12m": 0.452,
+  "payout_any": 0.452,
+  "days_to_first_payout_med": 51.0,
+  "payouts_mean": 1.036,
+  "net_mean": 900.6316506944438,
+  "net_median": -130.0,
+  "p_profit": 0.452,
+  "blown_after_pass": 0.8628099173553719,
+  "moved_live": 0.083,
+  "eval_size": [
+   "budget",
+   445.18550560232916
+  ],
+  "funded_size": [
+   "budget",
+   445.18550560232916
+  ]
+ },
+ "3_balanced | scaled | edge 0.5": {
+  "pass": 0.4345,
+  "days_to_pass_med": 36.0,
+  "payout_6m": 0.2645,
+  "payout_12m": 0.272,
+  "payout_any": 0.272,
+  "days_to_first_payout_med": 56.0,
+  "payouts_mean": 0.5255,
+  "net_mean": 347.5118166886815,
+  "net_median": -130.0,
+  "p_profit": 0.272,
+  "blown_after_pass": 0.9413118527042578,
+  "moved_live": 0.0255,
+  "eval_size": [
+   "budget",
+   445.18550560232916
+  ],
+  "funded_size": [
+   "budget",
+   445.18550560232916
+  ]
+ },
+ "baseline_bot | literal | edge 1.0": {
+  "pass": 0.681,
+  "days_to_pass_med": 56.0,
+  "payout_6m": 0.094,
+  "payout_12m": 0.327,
+  "payout_any": 0.327,
+  "days_to_first_payout_med": 160.5,
+  "payouts_mean": 0.7185,
+  "net_mean": 453.3376601786188,
+  "net_median": -130.0,
+  "p_profit": 0.327,
+  "blown_after_pass": 0.16813509544787078,
+  "moved_live": 0.019,
+  "eval_size": [
+   "budget",
+   350.0
+  ],
+  "funded_size": [
+   "budget",
+   250.0
+  ]
+ },
+ "baseline_bot | literal | edge 0.5": {
+  "pass": 0.472,
+  "days_to_pass_med": 61.0,
+  "payout_6m": 0.0385,
+  "payout_12m": 0.145,
+  "payout_any": 0.145,
+  "days_to_first_payout_med": 165.0,
+  "payouts_mean": 0.272,
+  "net_mean": 75.62638566298241,
+  "net_median": -130.0,
+  "p_profit": 0.145,
+  "blown_after_pass": 0.3167372881355932,
+  "moved_live": 0.0045,
+  "eval_size": [
+   "budget",
+   350.0
+  ],
+  "funded_size": [
+   "budget",
+   250.0
+  ]
+ },
+ "baseline_bot | scaled | edge 1.0": {
+  "pass": 0.4375,
+  "days_to_pass_med": 18.0,
+  "payout_6m": 0.2755,
+  "payout_12m": 0.278,
+  "payout_any": 0.278,
+  "days_to_first_payout_med": 49.0,
+  "payouts_mean": 1.0685,
+  "net_mean": 1000.8444276927353,
+  "net_median": -130.0,
+  "p_profit": 0.278,
+  "blown_after_pass": 0.6262857142857143,
+  "moved_live": 0.163,
+  "eval_size": [
+   "budget",
+   623.2597078432608
+  ],
+  "funded_size": [
+   "budget",
+   445.18550560232916
+  ]
+ },
+ "baseline_bot | scaled | edge 0.5": {
+  "pass": 0.308,
+  "days_to_pass_med": 18.0,
+  "payout_6m": 0.137,
+  "payout_12m": 0.1405,
+  "payout_any": 0.1405,
+  "days_to_first_payout_med": 52.0,
+  "payouts_mean": 0.4525,
+  "net_mean": 310.9098733115647,
+  "net_median": -130.0,
+  "p_profit": 0.1405,
+  "blown_after_pass": 0.8295454545454546,
+  "moved_live": 0.052,
+  "eval_size": [
+   "budget",
+   623.2597078432608
+  ],
+  "funded_size": [
+   "budget",
+   445.18550560232916
+  ]
+ }
+}

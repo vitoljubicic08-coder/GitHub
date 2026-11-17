@@ -53,3 +53,14 @@ Committed BEFORE either test is run (`backtest/run_lucid5.py`, `backtest/lucid5.
   * and on the design data with half the edge.
 * The 2023-26 period is where NB3 was designed. It is out of sample for these risk and payout
   choices, not for the signal.
+
+## Part 2b (added after Part 2's check, before running it): the same search at today's volatility
+
+* **Why:** Part 2's dollar sizes assume each period's own volatility. Today one MNQ at a 0.3-ATR stop
+  risks about $275 (real NQ data, Sep-Nov 2026). That is 1.8 times the 2023-26 median, so the
+  "$250" picks of Part 2 cannot place a single contract today (`lucid5_curvol.py`).
+* **Rescaling:** in each period, every trade's dollar risk per MNQ is multiplied by one factor. The
+  factor makes the period's median 0.3-ATR one-MNQ risk equal $275.3. Outcomes in R are unchanged.
+* **Grid, objective, picks and check:** identical to Part 2.
+  * Design: 2016-2022, rescaled.
+  * Check, run once: 2023-26 rescaled, with full and half edge, and design rescaled with half edge.

@@ -52,6 +52,11 @@ def build_pool(d: dict, start: int, end: int, stop: float, rr: float, mt: int) -
     dd = lab4.subset(d, start, end)
     sig, _ = lab4.signals4(dd, "nb3", ("none", "first" if mt == 1 else "pass"))
     t = lab4.bracket(dd, sig, stop, rrs=(rr,), max_trades=mt, slip=ps.MNQ_TICK_Q, commission=0.0)[rr]
+    return pool_from_trades(dd, t)
+
+
+def pool_from_trades(dd: dict, t: dict) -> dict:
+    """Day-indexed pool (at most 2 trades per day, in exit order) from a bracket result on `dd`."""
     n = len(dd["dkey"])
     pool = {"dkey": dd["dkey"], "n": n}
     for j in (1, 2):
@@ -94,14 +99,22 @@ def streams(pool: dict, n: int, horizon: int, block: int = 10, seed: int = 0, ed
     return out
 
 
-def _contracts(mode, cushion, dpr):
+SCALING_50K = ((1000.0, 20), (2000.0, 30), (float("inf"), 40))   # funded profit tier -> max micros
+
+
+def funded_cap(profit):
+    """LucidFlex 50K funded scaling plan (help centre, checked 2026-11-17), from the session's start profit."""
+    return np.where(profit < 1000.0, 20, np.where(profit < 2000.0, 30, 40))
+
+
+def _contracts(mode, cushion, dpr, cap=None):
     with np.errstate(invalid="ignore", divide="ignore"):
         risk = mode[1] if mode[0] == "budget" else mode[1] * cushion
         c = np.floor(risk / dpr + 1e-9)
-    return np.clip(np.nan_to_num(c), 0, LUCID.max_micros)
+    return np.clip(np.nan_to_num(c), 0, LUCID.max_micros if cap is None else cap)
 
 
-def _day(pool, st, t, mode, cushion):
+def _day(pool, st, t, mode, cushion, cap=None):
     """Closed P&L and worst intraday P&L ($) of every lifecycle's day t."""
     idx = st["idx"][:, t]
     pnl = np.zeros(len(idx))
@@ -116,13 +129,14 @@ def _day(pool, st, t, mode, cushion):
             cv = st[f"conv{j}"][:, t]
             r = np.where(cv, st["stop_r"], r)
             lo = np.where(cv, st["stop_r"], lo)
-        c = np.where(has, _contracts(mode, cushion, np.where(has, dpr, 1.0)), 0.0)
+        c = np.where(has, _contracts(mode, cushion, np.where(has, dpr, 1.0), cap), 0.0)
         low = np.minimum(low, pnl + c * lo * dpr - c * COMM / 2)
         pnl = pnl + c * r * dpr - c * COMM
     return pnl, low
 
 
-def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_accounts: int = 1) -> dict:
+def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_accounts: int = 1,
+             scaling_plan: bool = False, snapshots: tuple = ()) -> dict:
     """max_accounts > 1: when an account ends (failed, blown or moved to live) a new $130 account is
     bought and started the next trading day, until that many accounts have been bought."""
     idx = st["idx"]
@@ -131,6 +145,7 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_
     fee = LUCID.eval_fee
     accounts = np.ones(n, int); fees = np.full(n, fee); cash_min = -fees.copy()
     npay_acc = np.zeros(n, int)
+    snap = {}
     first_acc = np.zeros(n, int)                 # which account produced the first payout (0 = none)
     cash_first = np.zeros(n)                     # cash spent on accounts when the first payout arrives
     phase = np.zeros(n, int)                    # 0 eval, 1 funded, 2 done
@@ -142,6 +157,8 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_
     gross = np.zeros(n); net = np.zeros(n)
     start_funded = np.zeros(n, bool)
     for t in range(H):
+        if t in snapshots:
+            snap[t] = net - fees
         # accounts that passed yesterday start funded today
         if start_funded.any():
             s = start_funded
@@ -169,7 +186,7 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_
             pe, le = _day(pool, st, t, cfg.eval_size, P - floor)
             pnl = np.where(ev, pe, pnl); low = np.where(ev, le, low)
         if fu.any():
-            pf, lf = _day(pool, st, t, cfg.funded_size, P - floor)
+            pf, lf = _day(pool, st, t, cfg.funded_size, P - floor, funded_cap(P) if scaling_plan else None)
             pnl = np.where(fu, pf, pnl); low = np.where(fu, lf, low)
         breach = live & (P + low <= floor)
         end[breach & ev] = 1
@@ -218,8 +235,10 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_
         phase[phase == 3] = 0                        # still "eval" until tomorrow's switch
         phase[start_funded] = 0
         best = np.where(start_funded, 0.0, best)
+    for k in snapshots:
+        snap.setdefault(k, net - fees)
     phase[start_funded] = 1
-    return {"passed": pass_day >= 0, "pass_day": pass_day, "first_pay": first_pay, "npay": npay,
+    return {"snap": snap, "passed": pass_day >= 0, "pass_day": pass_day, "first_pay": first_pay, "npay": npay,
             "gross": gross, "net": net, "end": end, "open_profit": np.where(phase == 1, P, 0.0),
             "accounts": accounts, "fees": fees, "cash_min": cash_min, "cash": net - fees,
             "first_acc": first_acc, "cash_first": cash_first}

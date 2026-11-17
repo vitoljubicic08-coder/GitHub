@@ -59,3 +59,15 @@ which is published in advance.
 * **"Improved" means:** the check-period Sharpe beats the base's check-period Sharpe.
 * **Lucid check:** improved picks are run through the LucidFlex simulator at today's volatility (round 6
   model, one $130 account): the chance of a payout within 12 months, and mean cash.
+
+## Outcome (added after the check; details in RESULTS_8.md)
+
+* **Picks:** P1 gap-with, P2 VIX above median, P3 gamma below median, P4 P1 + P2, P5 standard-deviation
+  target (k = 2).
+* **Check Sharpe:**
+  * base 1.57;
+  * P1 1.51, P2 1.10, P3 0.90, P4 1.17 (not improved);
+  * **P5 1.84 (improved)**.
+* **Lucid:** P5 did not raise the payout chance: 41.6% vs 42.1% on 2023-26, and 26.5% vs 30.4% on
+  2016-22.
+* **ICT OTE entries and negative dealer gamma:** clearly worse.

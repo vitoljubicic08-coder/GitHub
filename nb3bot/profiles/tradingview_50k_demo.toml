@@ -1,0 +1,85 @@
+# Profile: tradingview_50k_demo  -  a SIMULATED $50,000 account, no money, no real orders.
+#
+# What runs where:
+#   * Signals: the exact NB3 V2 engine (this program) on QQQ 1-minute bars from Alpaca's free
+#     market-data API (real-time IEX bars live; consolidated SIP bars for history and the evening rebuild).
+#   * Orders: filled by this program's own paper broker. MNQ prices are SIMULATED as QQQ x ratio,
+#     because no free licensed real-time CME futures feed exists.
+#   * TradingView: charts only (compare the NB3 V2 indicator by eye). TradingView's terms forbid using its
+#     data, alerts or webhooks for automated trading, and it offers no API to place orders in its Paper
+#     Trading account, so these simulated trades do NOT appear in TradingView.
+#   * Account rules: Topstep 50K Trading Combine (checked on topstep.com 2026-11-17): $3,000 target,
+#     $2,000 loss limit trailing the highest END-OF-DAY balance but breached in real time (open P&L counts),
+#     stops trailing at $50,000, best day <= 55% of profit, $1,000 daily loss limit.
+# Secrets: the Alpaca key ID and secret come from environment variables (the macOS launcher reads them
+# from your Keychain). Never write keys into this file.
+
+[bot]
+profile = "tradingview_50k_demo"
+banner = "SIMULATED $50,000 demo: every order is filled by this program's paper broker, NOT in TradingView and NOT at any broker. MNQ prices are simulated from QQQ."
+mode = "paper"
+state_dir = "state_demo"
+log_dir = "logs_demo"
+display_timezone = "Europe/Zagreb"
+loop_interval_seconds = 1.0
+
+[strategy]
+signal_source = "QQQ"
+early_close_policy = "skip"
+max_signal_delay_seconds = 45
+warmup_sessions = 250
+
+[instrument]
+symbol = "MNQ"
+tick_size = 0.25
+tick_value = 0.50
+point_value = 2.0
+stop_conversion = "qqq_ratio"      # stop = the strategy's QQQ stop x (MNQ price / QQQ price); never changed to fit
+roll_days_before_expiry = 8
+
+[costs]
+commission_round_turn = 1.22       # Topstep's published MNQ all-in round turn
+slippage_ticks_per_side = 1.0      # charged on entries, stops and the 15:55 exit
+extra_stop_slippage_ticks = 4.0
+
+[risk]
+phase = "evaluation"               # evaluation ($350 budget) | funded ($250 budget)
+evaluation_risk_per_trade = 350.0  # a trade is SKIPPED if one MNQ (stop + costs) costs more
+funded_risk_per_trade = 250.0
+max_contracts = 1
+max_daily_loss = 400.0
+max_weekly_loss = 800.0
+max_total_drawdown = 2000.0
+safety_reserve = 100.0
+halt_after_consecutive_losses = 0
+edge_stop_rules = true
+
+[account]
+preset = "topstep_combine_50k"     # $50,000 start, $3,000 target, $2,000 EOD trailing, 55% consistency, $1,000 DLL
+
+[broker]
+name = "paper"                     # the program's own simulated broker; nothing leaves this computer
+
+[data]
+qqq_provider = "alpaca"
+alpaca_api_base = "https://data.alpaca.markets"
+alpaca_key_id_env = "ALPACA_API_KEY_ID"
+alpaca_secret_env = "ALPACA_API_SECRET_KEY"
+alpaca_live_feed = "iex"           # free plan: real-time IEX (one exchange)
+alpaca_history_feed = "sip"        # free plan: all-exchange bars older than 15 minutes
+mnq_provider = "synthetic"
+synthetic_ratio = 41.3             # MNQ / QQQ; update it from TradingView (MNQ1! price / QQQ price) if you like
+allow_empty_minutes = true         # IEX has no bar for a minute without IEX trades: that is normal
+stale_after_seconds = 180
+bar_grace_seconds = 3.0
+max_bar_delay_seconds = 20.0
+eod_rebuild_delay_minutes = 20     # wait until the consolidated bars are older than 15 minutes
+
+[authorization]
+practice_orders_enabled = false
+live_orders_enabled = false
+
+[dashboard]
+enabled = true
+host = "127.0.0.1"
+port = 8765

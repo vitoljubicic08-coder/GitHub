@@ -31,6 +31,9 @@
   button.secondary { background:transparent; color:var(--text); border-color:var(--line); }
   input { font:inherit; padding:7px 9px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); width:220px; }
   .small { font-size:12px; color:var(--muted); }
+  .banner { margin:12px 16px 0; padding:10px 14px; border-radius:10px; border:1px solid var(--warn); color:var(--warn);
+            background:var(--card); font-weight:600; max-width:1268px; }
+  @media (min-width:1332px) { .banner { margin-left:auto; margin-right:auto; } }
   ul { margin:0; padding-left:18px; }
 </style>
 </head>
@@ -39,6 +42,7 @@
   <h1>NB3 V2 Bot <span id="mode" class="pill"></span> <span id="armed" class="pill"></span></h1>
   <div class="clock"><span id="tny"></span> &nbsp;·&nbsp; <span id="tzg"></span></div>
 </header>
+<div id="banner" class="banner" hidden></div>
 <main>
   <section class="card"><h2>Safety</h2><div class="kv" id="safety"></div></section>
   <section class="card"><h2>Account and risk</h2><div class="kv" id="account"></div></section>
@@ -46,6 +50,9 @@
   <section class="card"><h2>Open trade</h2><div class="kv" id="trade"></div></section>
   <section class="card"><h2>Performance (bot's own trades)</h2><div class="kv" id="perf"></div></section>
   <section class="card"><h2>Market data</h2><div class="kv" id="data"></div></section>
+  <section class="card"><h2>Live vs final-data signals</h2><div class="kv" id="agree"></div>
+    <p class="small">Each evening the bot re-downloads the day's consolidated bars and checks whether they give the same
+      signal as the live data did. With a single-exchange feed (IEX) some days can differ.</p></section>
   <section class="card wide"><h2>Risk checks for today's signal</h2><table id="checks"></table></section>
   <section class="card wide"><h2>Recent trades</h2><table id="trades"></table></section>
   <section class="card wide"><h2>Alerts</h2><ul id="alerts"></ul></section>
@@ -71,7 +78,8 @@ async function tick() {
   let s;
   try { s = await (await fetch("/api/status")).json(); } catch (e) { $("tny").textContent = "bot not reachable"; return; }
   $("tny").textContent = s.time_new_york || ""; $("tzg").textContent = s.time_zagreb || "";
-  $("mode").textContent = (s.mode || "").toUpperCase();
+  $("mode").textContent = (s.mode || "").toUpperCase() + (s.profile ? " · " + s.profile : "");
+  if (s.banner) { $("banner").hidden = false; $("banner").textContent = s.banner; }
   $("mode").className = "pill " + (s.mode === "live" ? "bad" : s.mode === "practice" ? "warn" : "good");
   $("armed").textContent = s.armed ? "ARMED" : "DISARMED"; $("armed").className = "pill " + (s.armed ? "good" : "warn");
   const halts = (s.halts || []);
@@ -82,7 +90,7 @@ async function tick() {
     ["Broker", esc(s.broker) + (s.broker_error ? " — " + esc(s.broker_error) : ""), s.broker_error ? "bad" : ""],
     ["Reconciliation", s.reconcile_ok ? "consistent" : "MISMATCH", s.reconcile_ok ? "good" : "bad"]]);
   const a = s.account || {};
-  kv($("account"), [["Rules", esc(a.rules)], ["Balance", money(a.balance)], ["Equity", money(a.equity)],
+  kv($("account"), [["Rules", esc(a.rules)], ["Starting balance", money(s.starting_balance)], ["Balance", money(a.balance)], ["Equity", money(a.equity)],
     ["Loss-limit floor", money(a.floor)], ["Room to the floor", money(a.remaining_allowance), a.remaining_allowance < 700 ? "bad" : ""],
     ["Today", money(a.day_pnl), a.day_pnl < 0 ? "bad" : "good"]]);
   const sig = s.today_signal;
@@ -98,9 +106,16 @@ async function tick() {
     ["Total P&L", money(p.total_pnl)], ["Edge monitor", esc(p.edge_status) + " — " + esc(p.edge_detail), p.edge_status === "ok" ? "good" : "bad"],
     ["Backtest reference", esc(p.backtest_reference)]]);
   const d = s.data || {};
-  kv($("data"), [["Signal bars today", esc(d.signal_bars)], ["MNQ bars today", esc(d.exec_bars)], ["Last bar (New York)", esc(d.last_bar_new_york)],
+  const src = s.data_sources || {};
+  kv($("data"), [["Signal data", esc(src.signal)], ["MNQ prices", esc(src.execution_prices),
+    String(src.execution_prices || "").startsWith("synthetic") ? "warn" : ""],
+    ...((src.notes || []).map(n => ["Note", esc(n), "warn"])),["Signal bars today", esc(d.signal_bars)], ["MNQ bars today", esc(d.exec_bars)], ["Last bar (New York)", esc(d.last_bar_new_york)],
     ["Incomplete 5-min bars", esc((d.incomplete_bars || []).join(", ") || "none"), (d.incomplete_bars || []).length ? "warn" : "good"],
     ["Errors", esc((d.errors || []).join(" | ") || "none"), (d.errors || []).length ? "bad" : "good"]]);
+  const ag = s.signal_agreement || {};
+  kv($("agree"), [["Same signal", esc(ag.same || 0)], ["No signal (both)", esc(ag.both_none || 0)],
+    ["Different signal", esc(ag.different || 0), ag.different ? "warn" : ""],
+    ["Missed live", esc(ag.missed_live || 0), ag.missed_live ? "warn" : ""], ["Extra live", esc(ag.extra_live || 0), ag.extra_live ? "warn" : ""]]);
   const chk = (s.today_decision && s.today_decision.checks) || [];
   $("checks").innerHTML = "<tr><th>Check</th><th>Result</th><th>Detail</th></tr>" +
     (chk.length ? chk.map(c => `<tr><td>${esc(c.check)}</td><td class="${c.ok ? "good" : "bad"}">${c.ok ? "pass" : "FAIL"}</td><td>${esc(c.detail)}</td></tr>`).join("")

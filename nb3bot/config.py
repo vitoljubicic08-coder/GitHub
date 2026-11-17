@@ -15,6 +15,8 @@ MODES = ("replay", "paper", "practice", "live")
 
 @dataclass
 class BotCfg:
+    profile: str = ""                     # e.g. tradingview_50k_demo (shown on the dashboard)
+    banner: str = ""                      # one-line notice shown at the top of the dashboard
     mode: str = "replay"
     state_dir: str = "state"
     log_dir: str = "logs"
@@ -90,12 +92,22 @@ class BrokerCfg:
 
 @dataclass
 class DataCfg:
-    qqq_provider: str = "massive"         # massive (Polygon-compatible REST) | replay
+    qqq_provider: str = "massive"         # massive (Polygon-compatible REST) | alpaca | replay
     qqq_api_base: str = "https://api.massive.com"
     qqq_api_key_env: str = "MASSIVE_API_KEY"
-    mnq_provider: str = "projectx"        # projectx | replay
+    alpaca_api_base: str = "https://data.alpaca.markets"
+    alpaca_key_id_env: str = "ALPACA_API_KEY_ID"
+    alpaca_secret_env: str = "ALPACA_API_SECRET_KEY"
+    alpaca_live_feed: str = "iex"         # free plan: real-time IEX only
+    alpaca_history_feed: str = "sip"      # free plan: consolidated (SIP) bars older than 15 minutes
+    mnq_provider: str = "projectx"        # projectx | synthetic (QQQ x ratio, paper/replay only) | replay
+    synthetic_ratio: float = 41.3         # MNQ/QQQ price ratio for synthetic futures prices
     bar_grace_seconds: float = 3.0        # wait this long after a minute ends before asking for it
     max_bar_delay_seconds: float = 20.0   # a finished minute still missing after this -> data problem
+    allow_empty_minutes: bool = False     # true for single-exchange feeds (IEX): a minute with no trades
+                                          # has no bar; then freshness is checked instead
+    stale_after_seconds: float = 180.0    # with allow_empty_minutes: no new bar for this long -> data problem
+    eod_rebuild_delay_minutes: float = 3.0  # wait after the close before re-downloading final bars
     max_ratio_deviation: float = 0.01     # MNQ/QQQ ratio vs its session median before entries halt
     replay_source: str = ""               # npz cache dir or CSV for replay / simulated-live runs
     replay_mnq_source: str = ""           # optional MNQ minute data for paper fills in replay
@@ -188,6 +200,19 @@ def validate(cfg: Config) -> list[str]:
         e.append("set broker.auto_oco_brackets_confirmed = true after switching the account to Auto OCO Brackets")
     if cfg.instrument.tick_size <= 0 or cfg.instrument.point_value <= 0:
         e.append("instrument tick_size and point_value must be positive")
+    if cfg.data.qqq_provider not in ("massive", "alpaca", "replay"):
+        e.append("data.qqq_provider must be massive, alpaca or replay")
+    if cfg.data.mnq_provider not in ("projectx", "synthetic", "replay"):
+        e.append("data.mnq_provider must be projectx, synthetic or replay")
+    if cfg.data.mnq_provider == "synthetic":
+        if cfg.bot.mode in ("practice", "live") or cfg.broker.name != "paper":
+            e.append("synthetic MNQ prices are only allowed with the paper broker (paper/replay modes)")
+        if cfg.strategy.signal_source != "QQQ":
+            e.append("synthetic MNQ prices are derived from QQQ: strategy.signal_source must be QQQ")
+        if not cfg.data.synthetic_ratio > 0:
+            e.append("data.synthetic_ratio must be positive")
+    if cfg.data.alpaca_live_feed not in ("iex", "sip") or cfg.data.alpaca_history_feed not in ("iex", "sip"):
+        e.append("alpaca feeds must be iex or sip")
     if cfg.strategy.signal_source == "MNQ" and cfg.instrument.stop_conversion != "native_atr":
         e.append("signal_source MNQ requires instrument.stop_conversion = native_atr")
     return e

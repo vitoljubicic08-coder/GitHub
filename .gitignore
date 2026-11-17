@@ -4,3 +4,7 @@ state/
 logs/
 runs/
 nb3bot.toml
+.venv/
+state_demo/
+logs_demo/
+nb3bot_demo.toml

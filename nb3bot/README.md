@@ -26,7 +26,15 @@ The researched NB3 V2 strategy as a working, automated trading system:
 | `app.py` | The runtime loop that ties everything together. |
 | `dashboard/` | Local web dashboard with New York and Zagreb time, risk checks, account room, trades, alerts and a kill button. |
 | `replay/` | Historical replay, the automated parity check, and simulated-live runs of the whole stack. |
-| `tests/` | 58 automated tests, including the 675-trade parity and full-stack replays. |
+| `tests/` | 70 automated tests, including the 675-trade parity, full-stack replays and the demo profile. |
+| `profiles/` | Ready-made configurations, such as `tradingview_50k_demo` (simulated $50,000 account). |
+
+## Simulated $50,000 demo on a Mac
+
+`bash install_mac.sh`, then double-click `start_demo.command`. That uses the `tradingview_50k_demo` profile:
+free Alpaca QQQ data, simulated MNQ prices and the bot's own paper broker. Without data keys it offers an offline
+demo on synthetic prices. TradingView is for viewing charts only: its terms forbid automated trading on its data,
+and it has no order API for its Paper Trading account. Details: [docs/bot/TRADINGVIEW_DEMO.md](../docs/bot/TRADINGVIEW_DEMO.md).
 
 ## Quick start
 

@@ -1,5 +1,8 @@
 # Installing the NB3 V2 bot
 
+> **On a Mac, for the simulated $50,000 demo, the short way is:** `bash install_mac.sh`, then double-click
+> `start_demo.command`. See [TRADINGVIEW_DEMO.md](TRADINGVIEW_DEMO.md). The steps below are the manual route.
+
 The bot is a Python program that runs on **your own computer**. Topstep forbids running automated trading from a VPS or through a VPN, so do not use one. Windows 10/11, macOS and Linux all work.
 
 ## 1. Install Python 3.11 or newer

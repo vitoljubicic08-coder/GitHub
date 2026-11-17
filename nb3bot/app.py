@@ -32,7 +32,6 @@ from nb3bot.strategy.nb3v2 import NB3V2Engine, NB3V2Params
 from nb3bot.timeutil import NY, ZAGREB, TradingCalendar, fmt_dual, minute_start, session_key
 
 PREP_TIME = time(9, 25)
-EOD_REBUILD_DELAY = timedelta(minutes=3)
 
 
 @dataclass
@@ -105,20 +104,23 @@ class Bot:
         self.audit.log("startup", mode=self.mode, authorized=self.authorized, detail=self.auth_detail, armed=self.armed,
                        broker=self.broker.name, time=fmt_dual(self.clock.now()))
 
-    def _feed_whole_session(self, eng: NB3V2Engine, key: int, s) -> None:
-        """Feed a complete historical session (Session or SessionFeed) to an engine; signals are ignored."""
+    def _feed_whole_session(self, eng: NB3V2Engine, key: int, s) -> list:
+        """Feed a complete historical session (Session or SessionFeed) to an engine; returns its signals."""
         eng.begin_session(key)
         if isinstance(s, SessionFeed):
             mins = [(m, b.o, b.h, b.l, b.c) for m, b in sorted(s.bars.items())]
         else:
             mins = [(m, o, h, l, c) for m, o, h, l, c, _ in s.minutes()]
-        i = 0
+        i, sigs = 0, []
         for b in range(78):
             while i < len(mins) and mins[i][0] < 5 * b + 5:
                 eng.on_minute(*mins[i])
                 i += 1
-            eng.complete_bar(b)
+            x = eng.complete_bar(b)
+            if x is not None:
+                sigs.append(x)
         eng.end_session()
+        return sigs
 
     def _contract_ids(self) -> list[str]:
         return [self.day.contract.id] if self.day and self.day.contract else []
@@ -169,7 +171,7 @@ class Bot:
             self.mgr.reconcile(self._contract_ids())
         if self.day is not None and not self.day.eod_done:
             close = datetime.combine(key_date(self.day.key), self.cal.close_time(key_date(self.day.key)), NY)
-            if now >= close + EOD_REBUILD_DELAY and self.mgr.active is None:
+            if now >= close + timedelta(minutes=self.cfg.data.eod_rebuild_delay_minutes) and self.mgr.active is None:
                 self._end_day(now)
         self._publish_status(now)
 
@@ -230,11 +232,12 @@ class Bot:
             day.next_fetch = minute_start(day.key, 0) + timedelta(seconds=60 + self.cfg.data.bar_grace_seconds)
             return
         missing_any = False
+        settled = expected_last_minute(now, day.key, self.cfg.data.max_bar_delay_seconds)
         for feed, src, is_sig in ((day.sig, self.sig_src, True), (day.exe, self.exe_src, False)):
-            have = [m for m in range(due + 1) if m not in feed.bars]
-            if not have:
+            want = [m for m in range(max(settled + 1, 0), due + 1) if m not in feed.bars]
+            if not want:
                 continue
-            start = minute_start(day.key, have[0])
+            start = minute_start(day.key, want[0])
             try:
                 bars = src.fetch(start, minute_start(day.key, due + 1))
             except Exception as e:  # noqa: BLE001 - provider errors are data problems, never crashes
@@ -251,7 +254,7 @@ class Bot:
                     self.engine.on_minute(m, b.o, b.h, b.l, b.c)
                 if not is_sig and isinstance(self.broker, PaperBroker):
                     self.broker.on_minute(b)
-            if any(m not in feed.bars for m in range(due + 1)):
+            if any(m not in feed.bars for m in want):
                 missing_any = True
         nxt = minute_start(day.key, due + 1) + timedelta(seconds=60 + self.cfg.data.bar_grace_seconds)
         day.next_fetch = now + timedelta(seconds=5) if missing_any else nxt
@@ -270,11 +273,20 @@ class Bot:
             if missing and not after_close and now < bar_end + timedelta(seconds=maxd):
                 return
             if missing and not after_close:
-                day.incomplete_bars.add(b)
-                self.audit.log("incomplete_bar", "WARN", bar=b, missing=len(missing))
+                if not self.cfg.data.allow_empty_minutes or self._sig_stale(bar_end):
+                    day.incomplete_bars.add(b)
+                    self.audit.log("incomplete_bar", "WARN", bar=b, missing=len(missing))
             sig = eng.complete_bar(b)
             if sig is not None:
-                self._on_signal(sig.to_dict(), bar_end, now, incomplete=bool(missing))
+                self._on_signal(sig.to_dict(), bar_end, now, incomplete=b in day.incomplete_bars)
+
+    def _sig_stale(self, at: datetime) -> bool:
+        """Single-exchange feeds: stale if the newest signal bar is older than stale_after_seconds at `at`."""
+        bars = self.day.sig.bars
+        if not bars:
+            return True
+        newest = minute_start(self.day.key, max(bars)) + timedelta(minutes=1)
+        return (at - newest).total_seconds() > self.cfg.data.stale_after_seconds
 
     def _mark(self, now: datetime) -> None:
         t = self.mgr.active
@@ -312,9 +324,13 @@ class Bot:
         problems = []
         if incomplete or sig["bar"] in day.incomplete_bars:
             problems.append("signal bar was incomplete (missing 1-minute data)")
-        h1 = check_feed(day.sig, now, self.cfg.data.max_bar_delay_seconds + 60, range(0, m_last + 1))
-        if not h1.ok:
-            problems.append(h1.detail)
+        if self.cfg.data.allow_empty_minutes:
+            if self._sig_stale(bar_end):
+                problems.append(f"{self.sig_src.name}: no new bar for more than {self.cfg.data.stale_after_seconds:.0f}s")
+        else:
+            h1 = check_feed(day.sig, now, self.cfg.data.max_bar_delay_seconds + 60, range(0, m_last + 1))
+            if not h1.ok:
+                problems.append(h1.detail)
         if not getattr(self.sig_src, "realtime", True):
             problems.append(f"{self.sig_src.name} reports DELAYED data")
         if math.isnan(exec_px):
@@ -396,7 +412,8 @@ class Bot:
         if len(final.bars) < len(day.sig.bars):
             final, source = day.sig, "live bars (re-download had fewer bars)"
         eng2 = NB3V2Engine.restore(day.start_snapshot)
-        self._feed_whole_session(eng2, day.key, final)
+        final_sigs = self._feed_whole_session(eng2, day.key, final)
+        self._record_signal_agreement(day, final_sigs[0].to_dict() if final_sigs else None, source)
         self.engine.end_session()
         self.engine = eng2
         self.store.put("engine_snapshot", {"engine": self.engine.snapshot(), "last_session": day.key})
@@ -411,6 +428,25 @@ class Bot:
         self.audit.log("session_end", session=day.key, history_source=source, bars=len(final.bars),
                        balance=round(self.account.s.balance, 2), floor=round(self.account.s.floor, 2),
                        incomplete_bars=sorted(day.incomplete_bars))
+
+    def _record_signal_agreement(self, day: Day, final: dict | None, source: str) -> None:
+        """Did the live data give the same signal as the final (re-downloaded) data? Tracked every day."""
+        live = day.signal
+        if live is None and final is None:
+            kind = "both_none"
+        elif live is None:
+            kind = "missed_live"
+        elif final is None:
+            kind = "extra_live"
+        else:
+            kind = "same" if (live["bar"], live["direction"]) == (final["bar"], final["direction"]) else "different"
+        agg = self.store.get("signal_agreement") or {"same": 0, "both_none": 0, "different": 0, "missed_live": 0, "extra_live": 0}
+        agg[kind] = agg.get(kind, 0) + 1
+        self.store.put("signal_agreement", agg)
+        lvl = "INFO" if kind in ("same", "both_none") else "WARN"
+        self.audit.log("signal_agreement", lvl, session=day.key, result=kind, final_source=source,
+                       live=None if live is None else (live["bar"], live["direction"]),
+                       final=None if final is None else (final["bar"], final["direction"]))
 
     # ------------------------------------------------------------------ emergencies
     def _on_kill(self, reason: str) -> None:
@@ -432,6 +468,11 @@ class Bot:
         pnl = [x["pnl"] for x in trades if x.get("pnl") is not None]
         es, ed = edge_status(rs)
         st = {
+            "profile": self.cfg.bot.profile, "banner": self.cfg.bot.banner,
+            "data_sources": {"signal": getattr(self.sig_src, "name", "?"), "execution_prices": getattr(self.exe_src, "name", "?"),
+                             "notes": list(getattr(self.sig_src, "notes", []))[-3:]},
+            "signal_agreement": self.store.get("signal_agreement"),
+            "starting_balance": self.account.r.starting_balance,
             "time_new_york": f"{now.astimezone(NY):%Y-%m-%d %H:%M:%S %Z}",
             "time_zagreb": f"{now.astimezone(ZAGREB):%Y-%m-%d %H:%M:%S %Z}",
             "mode": self.mode, "armed": self.armed, "authorized": self.authorized, "authorization": self.auth_detail,

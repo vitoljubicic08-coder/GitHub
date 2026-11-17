@@ -37,6 +37,15 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
 
+    def close(self) -> None:
+        try:
+            self.db.close()
+        except Exception:  # noqa: BLE001 - closing twice or at interpreter exit is harmless
+            pass
+
+    def __del__(self):
+        self.close()
+
     # ------------------------------------------------------------------ key/value
     def put(self, k: str, v) -> None:
         with self._lock:

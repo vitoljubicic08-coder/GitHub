@@ -46,6 +46,7 @@ dailyLoss     = input.float(800.0, "Daily loss limit ($, incl. open trade)", min
 dailyProfit   = input.float(0.0, "Daily profit cap ($, 0 = off)", minval = 0, group = GR)
 flattenAtCap  = input.bool(false, "Close the open trade at the daily profit cap", group = GR)
 bestDayCapOn  = input.bool(true, "Evaluation: keep each day under 40% x $3,000", group = GR)
+tradeToLimit  = input.bool(true, "Keep trading near the loss limit", group = GR, tooltip = "On: trade while the account is above the loss limit (a frozen account cannot recover; 10-year backtest +$15.7k vs +$8.0k). Off: skip trades whose worst case would leave less than $100 above the limit.")
 nqRatio       = input.float(41.3, "NQ / QQQ price ratio", minval = 30, maxval = 50, group = GR)
 GS = "Strategy"
 rewardRisk    = input.float(1.5, "Target (R)", minval = 0.5, maxval = 5, step = 0.5, group = GS, tooltip = "1.5 = Lucid steady. 3.0 = NB3 V2.")
@@ -283,7 +284,7 @@ if barstate.isconfirmed and (buySignal or sellSignal) and strategy.position_size
         skipWhy := lockReason
     else if today - worst < -dailyLoss
         skipWhy := "would exceed the daily loss limit"
-    else if equityNow - worst - SAFETY < floorBal
+    else if not tradeToLimit and equityNow - worst - SAFETY < floorBal
         skipWhy := "too close to the loss limit"
     else if dailyProfit > 0 and today >= dailyProfit
         skipWhy := "daily profit cap"

@@ -449,6 +449,7 @@ class Bot:
                            edge_status=es, edge_detail=ed, trades_today=done_today,
                            max_trades_per_day=self.params.max_trades_per_day, day_locked=day.locked,
                            max_daily_profit=self.cfg.risk.max_daily_profit, consistency_cap=self.consistency_cap(),
+                           halt_near_limit=self.cfg.risk.halt_near_limit,
                            planned_gain=sizing.contracts * (sizing.target_ticks * tv - self.cfg.costs.commission_round_turn
                                                             - self.cfg.costs.slippage_ticks_per_side * tv))
         dec = evaluate(ctx)

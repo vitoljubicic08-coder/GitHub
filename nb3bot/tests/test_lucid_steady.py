@@ -111,6 +111,20 @@ class DailyLimitTests(unittest.TestCase):
         rig.store.close()
 
 
+class NearLimitTests(unittest.TestCase):
+    def test_lucid_profile_keeps_trading_near_the_limit_default_halts(self):
+        from nb3bot.risk.guard import evaluate
+        from nb3bot.tests.test_time_risk import ctx
+        acc = AccountTracker(PRESETS["topstep_combine_50k"])
+        acc.realize(-1800)                               # $200 above the floor, worst case ~$252
+        halted = evaluate(ctx(account=acc))
+        self.assertIn("loss_limit_headroom", [n for n, ok, _ in halted.checks if not ok])
+        relaxed = evaluate(ctx(account=acc, halt_near_limit=False, max_total_drawdown=5000, max_daily_loss=5000))
+        self.assertNotIn("loss_limit_headroom", [n for n, ok, _ in relaxed.checks if not ok])
+        self.assertFalse(load(PROFILE).risk.halt_near_limit)
+        self.assertTrue(load(HERE / "profiles" / "tradingview_50k_demo.toml").risk.halt_near_limit)
+
+
 class AccountRuleTests(unittest.TestCase):
     def test_funded_scaling_plan(self):
         acc = AccountTracker(PRESETS["lucid_flex_50k_funded"])

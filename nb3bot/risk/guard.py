@@ -60,6 +60,7 @@ class TradeContext:
     day_locked: str = ""               # daily loss / profit lockout reason ("" = not locked)
     max_daily_profit: float = 0.0      # 0 = off
     consistency_cap: float | None = None   # evaluation best-day cap in $ (rule x profit target)
+    halt_near_limit: bool = True       # False: only require equity above the firm floor
     planned_gain: float = 0.0          # the trade's profit at its full target, after costs
 
 
@@ -90,9 +91,14 @@ def evaluate(c: TradeContext) -> Decision:
         f"planned loss ${s.planned_loss:,.2f} vs limit ${c.max_trade_risk:,.2f}")
     acc = c.account
     room = acc.remaining_allowance() - s.worst_case_loss
-    add("loss_limit_headroom", room >= c.safety_reserve,
-        f"equity ${acc.equity:,.2f}, firm floor ${acc.s.floor:,.2f}, worst case ${s.worst_case_loss:,.2f}, "
-        f"left ${room:,.2f} (reserve ${c.safety_reserve:,.0f})")
+    if c.halt_near_limit:
+        add("loss_limit_headroom", room >= c.safety_reserve,
+            f"equity ${acc.equity:,.2f}, firm floor ${acc.s.floor:,.2f}, worst case ${s.worst_case_loss:,.2f}, "
+            f"left ${room:,.2f} (reserve ${c.safety_reserve:,.0f})")
+    else:
+        add("loss_limit_headroom", acc.remaining_allowance() > 0,
+            f"equity ${acc.equity:,.2f}, firm floor ${acc.s.floor:,.2f}, worst case ${s.worst_case_loss:,.2f}"
+            + (" (a full loss would reach the firm limit: trading on, as configured)" if room < 0 else ""))
     dll = acc.r.daily_loss_limit
     if dll:
         left = dll + acc.day_pnl() - s.worst_case_loss

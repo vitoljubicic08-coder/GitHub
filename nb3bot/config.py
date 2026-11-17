@@ -68,6 +68,10 @@ class RiskCfg:
     max_weekly_loss: float = 800.0
     max_total_drawdown: float = 2000.0    # from the account's high-water mark (= the firm's limit by default)
     safety_reserve: float = 100.0         # must remain above the firm loss limit after the worst case
+    halt_near_limit: bool = True          # True: halt when the worst case would leave < safety_reserve above the
+                                          # firm limit. False (one-time-fee accounts such as LucidFlex): keep
+                                          # trading while the account is above the limit; a frozen account cannot
+                                          # recover, and failing it costs nothing extra (10-year backtest)
     halt_after_consecutive_losses: int = 0  # 0 = off (not part of the tested strategy)
     edge_stop_rules: bool = True          # pre-registered stop rules from the research report
     edge_min_mean_200: float = 0.05       # 200-trade rule: stop if the mean R is below this (NB3 V2: +0.05R)

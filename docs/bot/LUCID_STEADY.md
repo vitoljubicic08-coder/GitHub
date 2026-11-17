@@ -23,6 +23,17 @@
 **Proof:** the bot reproduces the research trade for trade. In a 2023-26 replay all **1,097 trades are
 identical** (`nb3bot/tests/test_lucid_steady.py`, reference `nb3bot/validation/reference_lucid_steady_qqq_trades.csv`).
 
+## Near the loss limit: keep trading (Lucid profile only)
+
+* **Other profiles:** by default the bot halts when a trade's worst case would leave less than $100 above
+  the firm's limit.
+* **Why not for Lucid:** on a LucidFlex account that froze every account for good. A frozen account cannot
+  recover, and failing it costs nothing beyond the $130 fee.
+* **So:** this profile sets `halt_near_limit = false` and keeps trading while the account is above the
+  limit.
+* **Effect:** in the 10-year backtest (`backtest/RESULTS_10Y_STEADY.md`), net cash nearly doubled: +$15,691
+  vs +$8,043 at historical volatility, and +$13,008 vs +$3,609 at today's.
+
 ## Daily limits (both profiles)
 
 | Limit | Lucid steady | When it acts |

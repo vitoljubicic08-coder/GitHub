@@ -1,0 +1,554 @@
+{
+ "by_year": {
+  "2016": {
+   "trades": 324,
+   "win": 0.45987654320987653,
+   "target": 0.3055555555555556,
+   "avg_r": 0.028389306484822636,
+   "total_r": 9.198135301082534,
+   "pf": 1.0570261161350976
+  },
+  "2017": {
+   "trades": 355,
+   "win": 0.4563380281690141,
+   "target": 0.30140845070422534,
+   "avg_r": -0.018821465160229502,
+   "total_r": -6.681620131881473,
+   "pf": 0.9646345734037763
+  },
+  "2018": {
+   "trades": 369,
+   "win": 0.4823848238482385,
+   "target": 0.34417344173441733,
+   "avg_r": 0.08688014170683175,
+   "total_r": 32.058772289820915,
+   "pf": 1.1771054829307142
+  },
+  "2019": {
+   "trades": 343,
+   "win": 0.4606413994169096,
+   "target": 0.3206997084548105,
+   "avg_r": 0.07052335137061096,
+   "total_r": 24.189509520119557,
+   "pf": 1.1496625973876662
+  },
+  "2020": {
+   "trades": 355,
+   "win": 0.4788732394366197,
+   "target": 0.3183098591549296,
+   "avg_r": 0.09978222908530325,
+   "total_r": 35.422691325282656,
+   "pf": 1.211454669186833
+  },
+  "2021": {
+   "trades": 372,
+   "win": 0.44086021505376344,
+   "target": 0.28225806451612906,
+   "avg_r": 0.024141779445475704,
+   "total_r": 8.980741953716961,
+   "pf": 1.0476897996716577
+  },
+  "2022": {
+   "trades": 380,
+   "win": 0.4631578947368421,
+   "target": 0.2868421052631579,
+   "avg_r": 0.03573133005217431,
+   "total_r": 13.577905419826239,
+   "pf": 1.0708814007135385
+  },
+  "2023": {
+   "trades": 367,
+   "win": 0.45231607629427795,
+   "target": 0.3188010899182561,
+   "avg_r": 0.041106955831734696,
+   "total_r": 15.086252790246633,
+   "pf": 1.0804898279049429
+  },
+  "2024": {
+   "trades": 371,
+   "win": 0.46900269541778977,
+   "target": 0.33692722371967654,
+   "avg_r": 0.10454968171700602,
+   "total_r": 38.78793191700923,
+   "pf": 1.2204980654888922
+  },
+  "2025": {
+   "trades": 346,
+   "win": 0.4913294797687861,
+   "target": 0.31213872832369943,
+   "avg_r": 0.11589544177988237,
+   "total_r": 40.0998228558393,
+   "pf": 1.2562386221983322
+  },
+  "2026": {
+   "trades": 92,
+   "win": 0.5108695652173914,
+   "target": 0.31521739130434784,
+   "avg_r": 0.15022616125266322,
+   "total_r": 13.820806835245017,
+   "pf": 1.347095553118283
+  },
+  "all": {
+   "trades": 3674,
+   "win": 0.4665215024496462,
+   "target": 0.31273816004354926,
+   "avg_r": 0.06111620851287633,
+   "total_r": 224.54095007630764,
+   "pf": 1.124750768463518
+  }
+ },
+ "plain": {
+  "total": 56157.72164724722,
+  "max_drawdown": -6954.478128043294,
+  "worst_day": -695.5137793022843,
+  "best_day": 1037.1396283429704,
+  "max_dd_date": 20220207,
+  "by_year": {
+   "2016": 2766.61095971979,
+   "2017": 351.4967161630134,
+   "2018": 7682.227280767445,
+   "2019": 5024.093676112741,
+   "2020": 10632.10888041071,
+   "2021": 1424.9515628294325,
+   "2022": 2989.454415245325,
+   "2023": 3620.480561305124,
+   "2024": 7861.734240853199,
+   "2025": 9195.955473116042,
+   "2026": 4608.607880724403
+  }
+ },
+ "lucid": {
+  "accounts": 49,
+  "fees": 6370.0,
+  "passed": 21,
+  "paid": 10,
+  "payouts": 13,
+  "gross": 11521.29,
+  "to_you": 9979.161,
+  "net": 3609.161,
+  "outcomes": {
+   "given up (too close to the loss limit)": 48,
+   "open": 1
+  },
+  "cash_by_year": {
+   "2016": -260.0,
+   "2017": -130.0,
+   "2018": -780.0,
+   "2019": -650.0,
+   "2020": 3230.425,
+   "2021": -449.54499999999996,
+   "2022": 53.93700000000001,
+   "2023": -780.0,
+   "2024": 1381.7930000000001,
+   "2025": 1521.812,
+   "2026": 470.73900000000003
+  },
+  "accounts_detail": [
+   {
+    "start": 20160104,
+    "end": 20161018,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20160629,
+    "pays": []
+   },
+   {
+    "start": 20161019,
+    "end": 20170508,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20170509,
+    "end": 20180305,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20180209,
+    "pays": []
+   },
+   {
+    "start": 20180306,
+    "end": 20180326,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20180327,
+    "end": 20180601,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20180502,
+    "pays": []
+   },
+   {
+    "start": 20180604,
+    "end": 20180824,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20180727,
+    "pays": []
+   },
+   {
+    "start": 20180827,
+    "end": 20181023,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20181018,
+    "pays": []
+   },
+   {
+    "start": 20181024,
+    "end": 20181226,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20181227,
+    "end": 20190304,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20190212,
+    "pays": []
+   },
+   {
+    "start": 20190305,
+    "end": 20190404,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20190405,
+    "end": 20190531,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20190603,
+    "end": 20190813,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20190731,
+    "pays": []
+   },
+   {
+    "start": 20190814,
+    "end": 20190916,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20190917,
+    "end": 20200302,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20191231,
+    "pays": [
+     [
+      20200131,
+      629.24
+     ],
+     [
+      20200225,
+      1768.64
+     ]
+    ]
+   },
+   {
+    "start": 20200303,
+    "end": 20200708,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20200622,
+    "pays": [
+     [
+      20200706,
+      568.08
+     ]
+    ]
+   },
+   {
+    "start": 20200709,
+    "end": 20201019,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20200903,
+    "pays": [
+     [
+      20200925,
+      819.78
+     ],
+     [
+      20201015,
+      692.51
+     ]
+    ]
+   },
+   {
+    "start": 20201020,
+    "end": 20201204,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20201207,
+    "end": 20201222,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20201223,
+    "end": 20210115,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20210119,
+    "end": 20210210,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20210211,
+    "end": 20210219,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20210222,
+    "end": 20210510,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20210511,
+    "end": 20210901,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20210617,
+    "pays": [
+     [
+      20210830,
+      544.95
+     ]
+    ]
+   },
+   {
+    "start": 20210902,
+    "end": 20211111,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20211112,
+    "end": 20211123,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20211124,
+    "end": 20220113,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20220114,
+    "end": 20220121,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20220124,
+    "end": 20220207,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20220208,
+    "end": 20220509,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20220414,
+    "pays": [
+     [
+      20220505,
+      959.93
+     ]
+    ]
+   },
+   {
+    "start": 20220510,
+    "end": 20220512,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20220513,
+    "end": 20221012,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20220727,
+    "pays": []
+   },
+   {
+    "start": 20221013,
+    "end": 20230315,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20230203,
+    "pays": []
+   },
+   {
+    "start": 20230316,
+    "end": 20230517,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20230518,
+    "end": 20230607,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20230608,
+    "end": 20230711,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20230712,
+    "end": 20230802,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20230803,
+    "end": 20230925,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20230915,
+    "pays": []
+   },
+   {
+    "start": 20230926,
+    "end": 20240118,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20231211,
+    "pays": []
+   },
+   {
+    "start": 20240119,
+    "end": 20240201,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20240202,
+    "end": 20240301,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20240304,
+    "end": 20240826,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20240620,
+    "pays": [
+     [
+      20240711,
+      609.52
+     ],
+     [
+      20240725,
+      1570.25
+     ]
+    ]
+   },
+   {
+    "start": 20240827,
+    "end": 20250121,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20241129,
+    "pays": [
+     [
+      20250116,
+      606.08
+     ]
+    ]
+   },
+   {
+    "start": 20250122,
+    "end": 20250307,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20250310,
+    "end": 20250714,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20250715,
+    "end": 20251001,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20250819,
+    "pays": [
+     [
+      20250910,
+      1147.59
+     ]
+    ]
+   },
+   {
+    "start": 20251002,
+    "end": 20260114,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20251215,
+    "pays": [
+     [
+      20251231,
+      615.01
+     ]
+    ]
+   },
+   {
+    "start": 20260115,
+    "end": 20260319,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": 20260223,
+    "pays": [
+     [
+      20260309,
+      989.71
+     ]
+    ]
+   },
+   {
+    "start": 20260320,
+    "end": 20260326,
+    "outcome": "given up (too close to the loss limit)",
+    "pass_date": null,
+    "pays": []
+   },
+   {
+    "start": 20260327,
+    "end": null,
+    "outcome": "open",
+    "pass_date": null,
+    "pays": []
+   }
+  ]
+ }
+}

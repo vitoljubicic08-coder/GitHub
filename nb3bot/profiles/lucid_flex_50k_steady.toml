@@ -65,6 +65,10 @@ consistency_day_cap = true         # evaluation: no entry whose full target coul
 max_weekly_loss = 2000.0
 max_total_drawdown = 2000.0
 safety_reserve = 100.0
+halt_near_limit = false            # keep trading while above the loss limit. Halting near it froze accounts that
+                                   # could never recover: 10-year backtest +$15,691 vs +$8,043 net over 27 vs 38
+                                   # accounts (backtest/RESULTS_10Y_STEADY.md). Failing a LucidFlex account costs
+                                   # nothing beyond its $130 fee.
 halt_after_consecutive_losses = 0
 edge_stop_rules = true
 edge_min_mean_200 = 0.0            # this setting's expected mean is only about +0.07-0.10R per trade

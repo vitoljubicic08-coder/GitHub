@@ -148,6 +148,7 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_
     snap = {}
     first_acc = np.zeros(n, int)                 # which account produced the first payout (0 = none)
     cash_first = np.zeros(n)                     # cash spent on accounts when the first payout arrives
+    first_amt = np.zeros(n)                      # gross amount of the first payout
     phase = np.zeros(n, int)                    # 0 eval, 1 funded, 2 done
     P = np.zeros(n); peak = np.zeros(n); best = np.zeros(n)
     floor = np.full(n, -LUCID.dd)
@@ -222,6 +223,7 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_
                 newf = pay & (first_pay < 0)
                 first_acc = np.where(newf, accounts, first_acc)
                 cash_first = np.where(newf, fees, cash_first)
+                first_amt = np.where(newf, amt, first_amt)
                 first_pay = np.where(newf, t, first_pay)
                 P = P - amt
                 npay = npay + pay
@@ -241,7 +243,7 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_
     return {"snap": snap, "passed": pass_day >= 0, "pass_day": pass_day, "first_pay": first_pay, "npay": npay,
             "gross": gross, "net": net, "end": end, "open_profit": np.where(phase == 1, P, 0.0),
             "accounts": accounts, "fees": fees, "cash_min": cash_min, "cash": net - fees,
-            "first_acc": first_acc, "cash_first": cash_first}
+            "first_acc": first_acc, "cash_first": cash_first, "first_amt": first_amt}
 
 
 def metrics(res: dict, fee: float = LUCID.eval_fee) -> dict:

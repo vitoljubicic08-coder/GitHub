@@ -120,3 +120,26 @@ python3 backtest/run_lucid5.py --inst $INST design && python3 backtest/run_lucid
 python3 backtest/run_lucid5.py --inst $INST design_now && python3 backtest/run_lucid5.py --inst $INST check_now
 NB3_INST=<inst cache> python3 -m unittest tests.test_lucid5
 ```
+
+## Follow-up: how many accounts until you are ahead? (`lucid5_accounts.py`, `results_round5/accounts_needed.json`)
+
+* **Model:**
+  * Accounts are bought one after another. When one fails, blows up or moves to live, the next
+    $130 account starts the following trading day, up to a budget.
+  * Only cash counts: payouts received minus fees paid.
+  * Today's volatility, Lucid-optimized setting, 2,000 simulated runs per row.
+
+| Scenario | Budget | P(ahead) after 12 months | P(ahead) after 24 months | Median cash after 24 months | Mean cash after 24 months |
+|---|---|---|---|---|---|
+| 2016-22 repeats (10-year test, realistic) | 3 accounts ($390) | 58% | 68% | +$301 | +$1,240 |
+| | 5 accounts ($650) | 56% | 71% | +$947 | +$1,746 |
+| | 10 accounts ($1,300) | 56% | 75% | +$1,167 | +$1,868 |
+| 2023-26 repeats (optimistic) | 3 accounts | 75% | 82% | +$1,010 | +$2,025 |
+| | 5 accounts | 73% | 87% | +$2,201 | +$2,941 |
+| 2023-26 at half its edge (pessimistic) | 3 accounts | 49% | 54% | +$103 | +$651 |
+| | 5 accounts | 47% | 58% | +$318 | +$1,010 |
+| No edge (luck only) | 5 accounts | 25% | 31% | -$650 | +$46 |
+
+* **Time limits the count:** a failed account takes about 2-3 months to play out, so one year fits
+  only 3-4 accounts in a row. A budget above 3 helps only over 24 months.
+* **Which account pays:** the first payout typically comes from the 1st or 2nd account.

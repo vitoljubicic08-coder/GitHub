@@ -122,10 +122,17 @@ def _day(pool, st, t, mode, cushion):
     return pnl, low
 
 
-def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None) -> dict:
+def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None, max_accounts: int = 1) -> dict:
+    """max_accounts > 1: when an account ends (failed, blown or moved to live) a new $130 account is
+    bought and started the next trading day, until that many accounts have been bought."""
     idx = st["idx"]
     n, H = idx.shape
     H = H if horizon is None else min(H, horizon)
+    fee = LUCID.eval_fee
+    accounts = np.ones(n, int); fees = np.full(n, fee); cash_min = -fees.copy()
+    npay_acc = np.zeros(n, int)
+    first_acc = np.zeros(n, int)                 # which account produced the first payout (0 = none)
+    cash_first = np.zeros(n)                     # cash spent on accounts when the first payout arrives
     phase = np.zeros(n, int)                    # 0 eval, 1 funded, 2 done
     P = np.zeros(n); peak = np.zeros(n); best = np.zeros(n)
     floor = np.full(n, -LUCID.dd)
@@ -142,6 +149,17 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None) -> d
             P[s] = peak[s] = 0.0
             floor[s] = -LUCID.dd
             start_funded[:] = False
+        if max_accounts > 1:
+            rs = (phase == 2) & (accounts < max_accounts)
+            if rs.any():
+                phase[rs] = 0
+                P[rs] = peak[rs] = best[rs] = cyc_p[rs] = 0.0
+                floor[rs] = -LUCID.dd
+                fixed[rs] = False
+                cyc_win[rs] = npay_acc[rs] = 0
+                accounts[rs] += 1
+                fees[rs] += fee
+                cash_min = np.minimum(cash_min, net - fees)
         live = phase < 2
         if not live.any():
             break
@@ -184,13 +202,17 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None) -> d
                 amt = np.where(pay, mx, 0.0)
                 gross += amt
                 net += np.where(pay, amt * LUCID.split - ps.TRANSFER_FEE, 0.0)
-                first_pay = np.where(pay & (first_pay < 0), t, first_pay)
+                newf = pay & (first_pay < 0)
+                first_acc = np.where(newf, accounts, first_acc)
+                cash_first = np.where(newf, fees, cash_first)
+                first_pay = np.where(newf, t, first_pay)
                 P = P - amt
                 npay = npay + pay
+                npay_acc = npay_acc + pay
                 cyc_win = np.where(pay, 0, cyc_win); cyc_p = np.where(pay, 0.0, cyc_p)
                 fixed |= pay
                 floor = np.where(pay, LUCID.floor_after_payout, floor)
-                done = pay & (npay >= LUCID.max_payouts)
+                done = pay & (npay_acc >= LUCID.max_payouts)
                 end[done] = 3
                 phase[done] = 2
         phase[phase == 3] = 0                        # still "eval" until tomorrow's switch
@@ -198,7 +220,9 @@ def simulate(pool: dict, st: dict, cfg: Config, horizon: int | None = None) -> d
         best = np.where(start_funded, 0.0, best)
     phase[start_funded] = 1
     return {"passed": pass_day >= 0, "pass_day": pass_day, "first_pay": first_pay, "npay": npay,
-            "gross": gross, "net": net, "end": end, "open_profit": np.where(phase == 1, P, 0.0)}
+            "gross": gross, "net": net, "end": end, "open_profit": np.where(phase == 1, P, 0.0),
+            "accounts": accounts, "fees": fees, "cash_min": cash_min, "cash": net - fees,
+            "first_acc": first_acc, "cash_first": cash_first}
 
 
 def metrics(res: dict, fee: float = LUCID.eval_fee) -> dict:

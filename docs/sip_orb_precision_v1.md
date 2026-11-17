@@ -358,6 +358,47 @@ instruments, giving 18,270 combinations.
   dataset outages and one half-day session (Nov 29, 2024) that TradingView would show without
   afternoon bars.
 
+## Round 4: can NB3 V2 make withdrawable prop-firm profits? (verification, firms, lifecycles)
+
+The full report, with sources, is a shared doc. This section lists the code and the headline numbers.
+
+**Part 1, verification** (`backtest/nb3_trades.py`, `backtest/nb3_verify.py` →
+`backtest/results_nb3v2/verify.json`):
+* 2023-03 to 2026-03: +0.195R per trade after costs over 675 trades.
+* 2025-26 holdout: +0.255R per trade (t = 2.95). Trading the opposite direction gives −0.200R, and the
+  random-direction permutation test gives p = 0.0004. All 40 neighbouring settings are positive.
+* The best 5% of trades produce 77% of the profit. The edge is mostly in falling months.
+
+**Part 3, futures transfer** (`backtest/nb3_futures.py` → `results_nb3v2/futures.json`, Sep-Nov 2026):
+* QQQ and NQ signals agree on direction on all 35 shared days and on the bar on 97% of them. The
+  per-trade correlation is 0.996.
+* SPY → ES transfers poorly, so it is not used.
+* One MNQ now risks about $275 at this stop (median $215 in 2025-26). The $150 and $250 risk settings
+  cannot place a single contract.
+
+**Parts 4-6, lifecycles** (`backtest/prop_sim.py`, tests in `backtest/tests/test_prop_sim.py`, results and
+`SUMMARY.md` in `backtest/results_props/`):
+* Firm rules modelled exactly: Topstep 50K, Tradeify Growth 50K, Lucid Flex 50K and Alpha Standard 50K.
+* Contracts are sized in whole MNQ, and loss limits are checked on each trade's minute-by-minute path.
+* Days are drawn by 10-day block bootstrap (2,000 lifecycles per configuration) and by chronological
+  replay from every start day.
+* Edge scenarios run from A (holdout as is) through 75 / 50 / 25 / 0% of the edge to F (execution
+  stress). The total is about 1.25 million simulated account histories.
+* With $350 / $250 risk (one MNQ), keeping $2,000 above the loss limit after payouts, scenario B at
+  today's volatility:
+
+  | Firm | Pass rate | First payout | Mean net per attempt |
+  |---|---|---|---|
+  | Lucid | 66% | 55% | +$1,956 |
+  | Tradeify | 63% | 51% | +$2,272 |
+  | Topstep | 67% | 57% | +$2,074 |
+
+* Only ~10% of attempts pass within one month.
+* With zero gross edge, all four firms lose money in replay. In bootstrap they land within ±$340 of
+  zero: you never pay a failed account's simulated losses, so a no-edge account is a cheap lottery.
+* Decision: viable only as a small, capped-risk side project after the bot passes paper trading. It
+  is not a scalable income.
+
 ## Known limitations
 
 * **Not compiled here.** The scripts were reviewed against the v6 reference but not compiled in

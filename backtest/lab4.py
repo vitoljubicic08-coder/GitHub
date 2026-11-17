@@ -422,12 +422,16 @@ def smt_signals(a: dict, b: dict, kind: str):
 # Bracket simulation with ATR or structural stops
 # ----------------------------------------------------------------------------
 def bracket(d: dict, sig: np.ndarray, stop, lvl=None, rrs=RRS4, max_trades: int = 1,
-            last_entry_min: int = 330, eod_min: int = il.EOD_MIN) -> dict:
+            last_entry_min: int = 330, eod_min: int = il.EOD_MIN, slip: float | None = None,
+            commission: float = il.COMMISSION) -> dict:
     """stop = ATR multiple (float) or "struct" (uses `lvl`). Returns {rr: dict of per-trade arrays}:
-    r (net R), kind (0 stop / 1 target / 2 time exit), day (row index), bar, dirn, dist (stop distance in ATR)."""
+    r (net R), kind (0 stop / 1 target / 2 time exit), day (row index), bar, dirn, dist (stop distance in
+    ATR), lo (worst unrealised R while open, after slippage, before commission; <= 0), exit (minute).
+    `slip` (price units per fill, default 2 ticks of $0.01) and `commission` (per unit per side) can be
+    replaced, e.g. by one MNQ tick and 0 when futures commissions are charged separately in dollars."""
     o, h, l, cf = d["o"], d["h"], d["l"], d["cf"]
     atr = d["atr_prev"]
-    slip = il.SLIP_TICKS * il.TICK
+    slip = il.SLIP_TICKS * il.TICK if slip is None else slip
     sig = sig.copy()
     if stop == "struct":
         with np.errstate(all="ignore"):
@@ -439,7 +443,7 @@ def bracket(d: dict, sig: np.ndarray, stop, lvl=None, rrs=RRS4, max_trades: int 
     entry_min = (BARS + 1) * 5
     out = {}
     for rr in rrs:
-        acc = {k: [] for k in ("r", "kind", "day", "bar", "dirn", "dist")}
+        acc = {k: [] for k in ("r", "kind", "day", "bar", "dirn", "dist", "lo", "exit")}
         busy = np.full(n, -1)
         for _ in range(max_trades):
             ok = (sig != 0) & (entry_min[None, :] < last_entry_min) & (entry_min[None, :] > busy[:, None])
@@ -485,13 +489,23 @@ def bracket(d: dict, sig: np.ndarray, stop, lvl=None, rrs=RRS4, max_trades: int 
             eod = ~st & ~tg
             px = np.where(eod, cf[sel, eod_min - 1] - dirn * slip, px)
             xm = np.where(st, s_i, np.where(tg, g_i, eod_min))
-            r = (dirn * (px - fill) - 2 * il.COMMISSION) / dist
+            r = (dirn * (px - fill) - 2 * commission) / dist
+            with np.errstate(invalid="ignore"):          # worst excursion before the exit minute
+                adv = np.where(dirn[:, None] > 0, ll - fill[:, None], fill[:, None] - hh) / dist[:, None]
+                before = live & (t < xm[:, None])
+                lo = np.nanmin(np.where(before, adv, 0.0), 1)
+                at_x = adv[ar, np.minimum(xm, 389)]
+            r_px = dirn * (px - fill) / dist
+            lo = np.minimum(lo, np.where(st, r_px, np.where(tg, np.maximum(np.nan_to_num(at_x), -1.0), r_px)))
+            lo = np.minimum(lo, 0.0)
             acc["r"].append(r)
             acc["kind"].append(np.where(st, 0, np.where(tg, 1, 2)))
             acc["day"].append(sel)
             acc["bar"].append(b)
             acc["dirn"].append(dirn)
             acc["dist"].append(dist / atr[sel])
+            acc["lo"].append(lo)
+            acc["exit"].append(xm)
             busy[sel] = xm
         out[rr] = {k: (np.concatenate(v) if v else np.array([])) for k, v in acc.items()}
     return out

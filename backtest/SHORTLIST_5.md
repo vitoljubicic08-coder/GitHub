@@ -1,0 +1,55 @@
+# Round 5: 10-year test of NB3 V2, and the best way to get paid by a Lucid Flex account
+
+Committed BEFORE either test is run (`backtest/run_lucid5.py`, `backtest/lucid5.py`).
+
+## Part 1: NB3 V2 on 7 years it has never seen
+
+* **Data:** the same public 1-minute dataset as rounds 1-4 (Hugging Face "Rrishab/OHLCV-1m"), QQQ
+  2016-01-04 .. 2023-02-28. No earlier round used these years.
+* **Rules:** NB3 V2 exactly as in the bot: band 1.0, first signal of the day, signal bars opening
+  09:30-14:50, stop 0.30 ATR, target 3R, exit at 15:55. Costs are the research costs: 2 ticks of
+  $0.01 plus $0.005 per share per side.
+* **Reported:** for each year and for the whole new period: trades, win rate, 3R hit rate,
+  average R, t-statistic, profit factor.
+* **Verdict for 2016-01 .. 2023-02 (decided now):**
+  * "confirmed": average R > 0 with t >= 2.0;
+  * "weak": average R > 0 with t < 2.0;
+  * "failed": average R <= 0.
+
+## Part 2: Lucid Flex 50K ($130 one-time): maximise the chance of getting paid
+
+* **Rules:** as in `prop_sim.FIRMS["lucid"]`, summarised in `lucid5.py`.
+  * Evaluation: +$3,000, with a $2,000 end-of-day trailing limit that is breached in real time and
+    stops at +$100. The best day must be <= 40% of the profit.
+  * Funded: a payout needs 5 days of +$150 or more. It can be 50% of profit, at most $2,000 and at
+    least $500. The split is 90%, and the account moves to live after 5 payouts.
+* **Signal:** NB3 V2's entry signal on QQQ, executed as MNQ. Costs: 1 tick of slippage and $1.50
+  per round turn; $82.6 per QQQ dollar per contract.
+* **Grid** (5,376 settings):
+  * Exits: stop 0.2 / 0.3 / 0.4 ATR x target 1R / 1.5R / 2R / 3R x 1 or 2 trades per day. With 2
+    trades, the second is the next NB3 signal after the first trade closes.
+  * Evaluation sizing:
+    * risk budget $250 / $350 / $500 / $700 per trade;
+    * or 10% / 15% / 20% / 30% of the distance to the loss limit.
+  * Funded sizing:
+    * risk budget $150 / $250 / $350 / $500;
+    * or 10% / 15% / 20% of the distance to the loss limit.
+  * Whole MNQ contracts only. A trade whose single contract exceeds the size is skipped.
+  * Payout requests: the maximum as soon as eligible, or only what keeps $500 / $1,000 / $2,000
+    above the post-payout loss limit.
+* **Design data:** 2016-01 .. 2022-12, never used for any choice.
+  * 2,000 lifecycles per setting, each a new $130 account.
+  * 10-day block bootstrap; 252 trading days (12 months).
+  * The same random day sequences for every setting.
+* **Objective:** the probability that one $130 account pays at least one payout within 12 months.
+* **Picks:**
+  1. the highest objective;
+  2. the highest expected net cash per account over 12 months;
+  3. "balanced": the highest expected net among settings within 2 points of the best objective.
+* **Check, run once:**
+  * the three picks, plus the bot's current setting as baseline (stop 0.3, 3R, 1/day, $350 / $250,
+    keep $2,000);
+  * scored on 2023-01 .. 2026-03 with the full edge and with half the edge;
+  * and on the design data with half the edge.
+* The 2023-26 period is where NB3 was designed. It is out of sample for these risk and payout
+  choices, not for the signal.

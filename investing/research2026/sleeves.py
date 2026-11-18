@@ -37,6 +37,13 @@ SLEEVES = {
     "MOMENTUM": ("momentum", "IS3R.DE", "Momentum: top-3 S&P sectors by 12-1 month return to May 2013, then MSCI USA Momentum (MTUM)"),
     "MEGA8": ("mega8", None, "Equal-weight NVDA, MSFT, AAPL, GOOGL, AMZN, META, AVGO, TSM (from Jun 2012; HINDSIGHT)"),
     "CASH": ("cash", "XEON.DE", "Euro cash: EONIA, then EUR STR (proxy for XEON)"),
+    # Phase 2 candidates
+    "MIDGROWTH": ("IJK", None, "US mid-cap growth (S&P MidCap 400 Growth, IJK; no UCITS equivalent found)"),
+    "MIDCAP": ("MDY", None, "US mid caps (S&P MidCap 400, MDY; proxy for iShares Core S&P Mid Cap 400 UCITS)"),
+    "QUALITY_SP": ("SPHQ", None, "S&P 500 Quality (SPHQ, from Dec 2005; quality proxy that covers 2008)"),
+    "EQW": ("RSP", "XDEW.DE", "S&P 500 Equal Weight (RSP, from May 2003; proxy for XDEW)"),
+    "LOWVOL": ("USMV", None, "MSCI USA Minimum Volatility (USMV, from Oct 2011; proxy for MSCI World Min Vol UCITS)"),
+    "SOFTWARE": ("IGV", None, "North American software (IGV, from Jul 2001; no UCITS equivalent checked)"),
 }
 MEGA8 = ["NVDA", "MSFT", "AAPL", "GOOGL", "AMZN", "META", "AVGO", "TSM"]
 STOCKS = ["MSFT", "AAPL", "GOOGL", "AMZN", "META", "AVGO", "TSM", "AMD", "ASML", "MU", "ORCL", "PLTR", "TSLA",
@@ -71,8 +78,10 @@ def daily_usd_returns(px: pd.DataFrame) -> pd.DataFrame:
     us = px[px["SPY"].notna()].copy()
     r = us.pct_change(fill_method=None)
     out = {}
-    for t in ("SPY", "QQQ", "SMH", "NVDA", "IWO", "ARKK", "IJS", "EZU", "XLK", "XLV", "XLP", "XLU", "XLE", "QUAL", "MTUM"):
-        out[t] = r[t]
+    for t in ("SPY", "QQQ", "SMH", "NVDA", "IWO", "ARKK", "IJS", "EZU", "XLK", "XLV", "XLP", "XLU", "XLE", "QUAL", "MTUM",
+              "IJK", "MDY", "SPHQ", "RSP", "USMV", "IGV"):
+        if t in r:
+            out[t] = r[t]
     world = 0.5 * r["SPY"] + 0.5 * r["VGTSX"]                           # daily-rebalanced 50/50 before ACWI
     world[r.index >= "2008-04-01"] = r["ACWI"][r.index >= "2008-04-01"]
     out["world"] = world

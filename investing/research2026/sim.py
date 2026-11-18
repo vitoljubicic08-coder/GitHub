@@ -58,21 +58,43 @@ def betas(X: pd.DataFrame) -> pd.Series:
 SLOPES = (1.0, 0.5)             # reward per unit of beta: CAPM (1.0) and the flatter line seen in practice (0.5)
 
 
-def forward_mu(cols, beta: pd.Series, scn: dict, slope: float = 1.0) -> np.ndarray:
-    """Monthly log drift per sleeve. slope < 1 flattens the reward for beta around the world portfolio
-    (beta 1 keeps the world return): high-beta assets have historically earned less than CAPM implies
-    (Frazzini and Pedersen, "Betting against beta", 2014)."""
+def forward_mu(cols, beta: pd.Series, scn: dict, slope: float = 1.0, vol: pd.Series | None = None,
+               mode: str = "arith") -> np.ndarray:
+    """Monthly log drift per sleeve under a scenario.
+
+    mode "arith" (Phase 2, correct): CAPM holds for ARITHMETIC expected returns. The world sleeve keeps the
+    scenario's compound return g_w, so its arithmetic mean is E_w = (1+g_w) exp(s_w^2/2) - 1; each sleeve gets
+    E_i = rf + b_i (E_w - rf) (+ AI tilt), and its log drift is ln(1+E_i) - s_i^2/2, using the sleeve's own
+    historical volatility s_i (`vol`, annual). High-volatility sleeves therefore get a lower median than mean.
+    mode "compound" (Phase 1, kept only to reproduce the first report): CAPM applied to compound returns, which
+    overstates the arithmetic expected return of high-volatility sleeves by about (s_i^2 - s_w^2)/2 a year.
+
+    slope < 1 flattens the reward for beta around the world portfolio (Frazzini and Pedersen 2014).
+    Gold and cash take the scenario's compound return directly."""
     out = []
+    if mode == "arith":
+        if vol is None:
+            raise ValueError("mode 'arith' needs each sleeve's annual volatility")
+        e_w = (1 + scn["world"]) * np.exp(vol["WORLD"] ** 2 / 2) - 1
     for c in cols:
         if c == "CASH":
-            mu = RF
-        elif c == "GOLD":
-            mu = scn["gold"]
+            out.append(np.log1p(RF) / 12)
+            continue
+        if c == "GOLD":
+            out.append(np.log1p(scn["gold"]) / 12)
+            continue
+        b = 1 + slope * (beta[c] - 1)
+        tilt = AI_EXPOSURE.get(c, 0.0) * scn["ai_alpha"] + scn.get("factor_alpha", {}).get(c, 0.0)
+        if mode == "compound":
+            out.append(np.log1p(RF + b * (scn["world"] - RF) + tilt) / 12)
         else:
-            b = 1 + slope * (beta[c] - 1)
-            mu = RF + b * (scn["world"] - RF) + AI_EXPOSURE.get(c, 0.0) * scn["ai_alpha"]
-        out.append(np.log1p(mu) / 12)                                  # monthly log drift (median growth)
+            e_i = RF + b * (e_w - RF) + tilt
+            out.append((np.log1p(e_i) - vol[c] ** 2 / 2) / 12)
     return np.array(out)
+
+
+def annual_vol(X: pd.DataFrame) -> pd.Series:
+    return X.std() * np.sqrt(12)
 
 
 def stationary_bootstrap(n_obs: int, n_paths: int, horizon: int, mean_block: float, rng) -> np.ndarray:
@@ -92,28 +114,45 @@ def bootstrap_raw(X: pd.DataFrame, n_paths=10_000, horizon=24, mean_block=6, see
 
 
 def bootstrap_forward(X: pd.DataFrame, n_paths=10_000, horizon=24, mean_block=6, seed=2, scenarios=None,
-                      slopes=SLOPES):
-    """Re-centred bootstrap; path k uses the k-th (scenario, slope) pair, cycling, so the 10,000 paths split
-    equally across 4 scenarios x 2 beta slopes. Returns (paths, labels "scenario/slope")."""
-    scenarios = scenarios or list(SCENARIOS)
+                      slopes=SLOPES, mode="arith", circular=True, scenario_defs=None):
+    """Re-centred bootstrap; path k uses the k-th (scenario, slope) pair, cycling, so the paths split equally
+    across scenarios x beta slopes. Returns (paths, labels "scenario/slope")."""
+    defs = scenario_defs or SCENARIOS
+    scenarios = scenarios or list(defs)
     combos = [(s, sl) for s in scenarios for sl in slopes]
     rng = np.random.default_rng(seed)
-    idx = stationary_bootstrap(len(X), n_paths, horizon, mean_block, rng)
+    idx = (stationary_bootstrap(len(X), n_paths, horizon, mean_block, rng) if circular
+           else stationary_bootstrap_linear(len(X), n_paths, horizon, mean_block, rng))
     A = X.to_numpy()
     base = A - A.mean(axis=0)
     b = betas(X)
+    v = annual_vol(X)
     R = base[idx]
     lab = np.array([f"{combos[k % len(combos)][0]}/{combos[k % len(combos)][1]}" for k in range(n_paths)])
     for s, sl in combos:
-        R[lab == f"{s}/{sl}"] += forward_mu(X.columns, b, SCENARIOS[s], sl)
+        R[lab == f"{s}/{sl}"] += forward_mu(X.columns, b, defs[s], sl, vol=v, mode=mode)
     return R, lab
 
 
-def t_mc(X: pd.DataFrame, n_paths=10_000, horizon=24, nu=5, seed=3, scenario="consensus", premium_sd=0.02):
+def stationary_bootstrap_linear(n_obs: int, n_paths: int, horizon: int, mean_block: float, rng) -> np.ndarray:
+    """As stationary_bootstrap, but a block that reaches the last month restarts at a random month instead of
+    wrapping from Oct 2026 back to Sep 2000."""
+    idx = np.empty((n_paths, horizon), dtype=np.int64)
+    idx[:, 0] = rng.integers(0, n_obs, n_paths)
+    new = rng.random((n_paths, horizon)) < 1.0 / mean_block
+    jump = rng.integers(0, n_obs, (n_paths, horizon))
+    for t in range(1, horizon):
+        nxt = idx[:, t - 1] + 1
+        idx[:, t] = np.where(new[:, t] | (nxt >= n_obs), jump[:, t], nxt)
+    return idx
+
+
+def t_mc(X: pd.DataFrame, n_paths=10_000, horizon=24, nu=5, seed=3, scenario="consensus", premium_sd=0.02,
+         mode="arith"):
     rng = np.random.default_rng(seed)
     cols = list(X.columns)
     b = betas(X)
-    mu = forward_mu(cols, b, SCENARIOS[scenario])
+    mu = forward_mu(cols, b, SCENARIOS[scenario], vol=annual_vol(X), mode=mode)
     cov = np.cov(X.to_numpy().T) * (nu - 2) / nu
     L = np.linalg.cholesky(cov + 1e-12 * np.eye(len(cols)))
     z = rng.standard_normal((n_paths, horizon, len(cols))) @ L.T

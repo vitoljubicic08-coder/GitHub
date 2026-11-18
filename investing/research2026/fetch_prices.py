@@ -22,6 +22,8 @@ GROUPS = {
     # longer-history mutual funds / indices (dot-com bubble build-up and earlier)
     "long": ["VFINX", "FSELX", "VUSTX", "VFITX", "VGTSX", "VEIEX", "^NDX", "^IXIC", "^SOX", "^GSPC", "^VIX",
              "^TNX", "^IRX", "GC=F"],
+    # Phase 2 candidates: mid-cap growth / mid caps, quality since 2005, low volatility, software, equal weight
+    "phase2": ["IWP", "IJK", "MDY", "SPHQ", "SPLV", "IGV", "XSD", "RSP", "QQQE", "VBK"],
     "fx": ["EURUSD=X"],
     "stocks": ["NVDA", "MSFT", "AAPL", "GOOGL", "AMZN", "META", "AVGO", "TSM", "AMD", "ASML", "MU", "ORCL",
                "PLTR", "TSLA", "NFLX", "LLY", "NVO", "JPM", "V", "MA", "COST", "BRK-B", "UNH", "SAP"],

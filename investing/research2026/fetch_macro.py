@@ -12,7 +12,8 @@ import argparse
 import subprocess
 from pathlib import Path
 
-FRED = ["DEXUSEU", "DFF", "DGS2", "DGS10", "T10Y2Y", "DTB3", "UNRATE", "CPIAUCSL", "BAMLH0A0HYM2", "DCOILBRENTEU"]
+FRED = ["DEXUSEU", "DFF", "DGS2", "DGS10", "T10Y2Y", "DTB3", "UNRATE", "CPIAUCSL", "BAMLH0A0HYM2", "DCOILBRENTEU",
+        "DFII10", "T10YIE"]
 ECB = {"ecb_eonia": "EON/D.EONIA_TO.RATE", "ecb_estr": "EST/B.EU000A2X2A25.WT"}
 
 

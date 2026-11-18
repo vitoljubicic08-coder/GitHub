@@ -1,0 +1,5 @@
+{
+ "A_AGGRESSIVE": {"NDX": 0.60, "SEMI": 0.20, "EM": 0.20},
+ "B_BALANCED": {"WORLD": 0.40, "NDX": 0.45, "GOLD": 0.15},
+ "C_PRESERVATION": {"WORLD": 0.50, "NDX": 0.15, "GOLD": 0.15, "CASH": 0.20}
+}

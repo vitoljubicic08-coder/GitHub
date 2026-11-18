@@ -13,8 +13,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "investing" / "research2026"))
 
+import lots  # noqa: E402
 import portfolios as pf  # noqa: E402
 import sim  # noqa: E402
+import sleeves as sv  # noqa: E402
 
 
 def flat_paths(n=3, months=24, sleeves=2, monthly=0.0):
@@ -116,6 +118,100 @@ class RulesAndBacktestTests(unittest.TestCase):
         self.assertEqual(rows[0]["p_double"], 0.0)
         self.assertLess(rows[3]["p_double"], 0.01)                          # 15% volatility
         self.assertGreater(rows[-1]["p_loss40"], rows[3]["p_loss40"])
+
+
+class Phase2DriftTests(unittest.TestCase):
+    """CAPM must hold for arithmetic expected returns; the world sleeve keeps its compound return."""
+
+    def setUp(self):
+        self.cols = ["CASH", "WORLD", "HI"]
+        self.beta = pd.Series({"CASH": 0.0, "WORLD": 1.0, "HI": 2.0})
+        self.vol = pd.Series({"CASH": 0.0, "WORLD": 0.15, "HI": 0.50})
+        self.scn = {"world": 0.07, "gold": 0.05, "ai_alpha": 0.0}
+
+    def test_world_keeps_its_compound_return(self):
+        mu = sim.forward_mu(self.cols, self.beta, self.scn, vol=self.vol, mode="arith")
+        self.assertAlmostEqual(np.expm1(mu[1] * 12), 0.07, places=10)
+
+    def test_arithmetic_capm_and_volatility_drag(self):
+        mu = sim.forward_mu(self.cols, self.beta, self.scn, vol=self.vol, mode="arith")
+        e_w = 1.07 * np.exp(0.15 ** 2 / 2) - 1
+        e_hi = np.exp(mu[2] * 12 + 0.5 ** 2 / 2) - 1                        # lognormal mean
+        self.assertAlmostEqual(e_hi, sim.RF + 2.0 * (e_w - sim.RF), places=10)
+        self.assertLess(np.expm1(mu[2] * 12), e_hi)                           # median below mean
+
+    def test_phase1_compound_mode_overstates_high_volatility(self):
+        old = sim.forward_mu(self.cols, self.beta, self.scn, vol=self.vol, mode="compound")
+        new = sim.forward_mu(self.cols, self.beta, self.scn, vol=self.vol, mode="arith")
+        self.assertGreater(old[2], new[2])
+        self.assertAlmostEqual(np.expm1(old[2] * 12), sim.RF + 2.0 * (0.07 - sim.RF), places=10)
+
+    def test_linear_bootstrap_restarts_instead_of_wrapping(self):
+        rng_a, rng_b = np.random.default_rng(3), np.random.default_rng(3)
+        lin = sim.stationary_bootstrap_linear(30, 4000, 24, 6, rng_a)
+        circ = sim.stationary_bootstrap(30, 4000, 24, 6, rng_b)
+
+        def after_last(idx):                       # share of moves out of the last month that go to month 0
+            frm, to = idx[:, :-1], idx[:, 1:]
+            m = frm == 29
+            return (to[m] == 0).mean()
+        self.assertGreater(after_last(circ), 0.75)  # wraps: 1 - 1/6 + (1/6)(1/30)
+        self.assertLess(after_last(lin), 0.10)      # restarts at a random month: about 1/30
+        self.assertTrue(((lin >= 0) & (lin < 30)).all())
+
+
+class LotEngineTests(unittest.TestCase):
+    def test_deposit_counts(self):
+        self.assertEqual(lots.deposit_schedule(24, 200, "end").sum(), 24 * 200)
+        self.assertEqual(lots.deposit_schedule(24, 200, "start").sum(), 23 * 200)
+
+    def test_matches_linear_grid_formula_and_phase1_engine(self):
+        rng = np.random.default_rng(0)
+        R = rng.normal(0.006, 0.05, (500, 24, 3))
+        port = {"A": 0.5, "B": 0.3, "CASH": 0.2}
+        for c in (0, 150):
+            s = lots.simulate_lots(R, ["A", "B", "CASH"], port, contrib=c)
+            A, dep = lots.grid_matrices(R, ["A", "B", "CASH"], list(port), contrib=c)
+            np.testing.assert_allclose(s["liq"], A @ np.array([0.5, 0.3, 0.2]), rtol=1e-12)
+            old = sim.simulate(R, ["A", "B", "CASH"], port, contrib=c)
+            np.testing.assert_allclose(s["after_tax"], old["after_tax"], rtol=1e-12)
+            self.assertEqual(dep, 5000 + 24 * c)
+
+    def test_each_lot_has_its_own_two_year_clock(self):
+        R = np.full((1, 36, 1), np.log(1.01))                                   # +1% a month
+        s = lots.simulate_lots(R, ["A"], {"A": 1.0}, contrib=100, horizon=36)
+        tc = 0.001
+        net = lambda m: (1 - tc) * (1 - tc) * 1.01 ** (36 - m)                # euro value per euro bought at month m
+        taxable_gain = sum(100 * (net(m) - 1) for m in range(13, 37))           # lots bought in months 13..36
+        self.assertAlmostEqual(s["tax"][0], 0.12 * taxable_gain, places=6)
+        exempt = 5000 * net(0) + sum(100 * net(m) for m in range(1, 13))
+        self.assertAlmostEqual(s["exempt_value"][0], exempt, places=6)
+
+    def test_rebalance_sale_taxes_only_young_lots(self):
+        R = np.zeros((1, 30, 2))
+        R[0, 0, 0] = np.log(2.0)                                               # A doubles in month 1
+        young = lots.simulate_lots(R, ["A", "B"], {"A": .5, "B": .5}, horizon=30, sell_rebalance_months=(12,))
+        old = lots.simulate_lots(R, ["A", "B"], {"A": .5, "B": .5}, horizon=30, sell_rebalance_months=(25,))
+        self.assertGreater(young["tax_rebal"][0], 0)
+        self.assertEqual(old["tax_rebal"][0], 0.0)                              # initial lot older than 2 years
+
+    def test_summary_thresholds_and_interval(self):
+        f = np.array([3000.0, 6000.0, 10_000.0, 12_000.0])
+        out = lots.summarize(f, 5000.0)
+        self.assertEqual(out["p_ge_10000"], 0.5)
+        self.assertEqual(out["p_loss40"], 0.25)
+        self.assertEqual(out["p_double_invested"], 0.5)
+        lo, hi = lots.binom_ci(0.5, 10_000)
+        self.assertLess(hi - lo, 0.02)
+
+
+class CurrencyTests(unittest.TestCase):
+    def test_a_stronger_euro_lowers_euro_returns_of_dollar_assets(self):
+        idx = pd.date_range("2024-01-01", periods=2, freq="D")
+        r_usd = pd.DataFrame({"X": [0.0, 0.0]}, index=idx)
+        fx = pd.Series([1.00, 1.10], index=idx)                                 # USD per EUR: euro +10%
+        r_eur = sv.to_eur(r_usd, fx)
+        self.assertAlmostEqual(r_eur["X"].iloc[1], 1 / 1.10 - 1, places=12)
 
 
 if __name__ == "__main__":

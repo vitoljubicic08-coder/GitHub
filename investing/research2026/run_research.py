@@ -9,6 +9,10 @@
 
 Writes investing/research2026/results/research.json. Seeds are fixed, so reruns on the same data give the
 same numbers. All simulated probabilities are model estimates under stated assumptions, not forecasts.
+
+PHASE 1 REPRODUCTION: this script deliberately keeps Phase 1's forward-return convention (CAPM applied to
+compound returns, `mode="compound"`), which the Phase 2 audit found overstates high-volatility sleeves. The
+corrected analysis is run_phase2.py.
 """
 from __future__ import annotations
 
@@ -33,6 +37,7 @@ LONG = ["CASH", "WORLD", "SPX", "NDX", "SEMI", "NVDA", "SPEC", "SCV", "EM", "EUR
         "STAPLES", "UTIL", "ENERGY", "MOMENTUM"]
 LONG_SPAN = ("2000-09-30", "2026-10-31")
 SHORT_SPAN = ("2013-08-31", "2026-10-31")          # QUALITY from Aug 2013; all 10 stocks listed by then
+P1 = "compound"                     # Phase 1 drift convention (see docstring)
 FINAL = {"NDX": .30, "SEMI": .20, "SCV": .20, "EM": .10, "GOLD": .20}
 CANDIDATES = {
     "D1": {"WORLD": .35, "NDX": .25, "SEMI": .15, "SCV": .10, "GOLD": .15},
@@ -136,15 +141,15 @@ def main():
         "beta_long": r(sim.betas(XL).to_dict(), 3),
         "vol_long": r((XL.std() * np.sqrt(12)).to_dict(), 3),
         "hist_mean_log_long": r((XL.mean() * 12).to_dict(), 3),
-        "expected_returns": {f"{s}/{sl}": r(dict(zip(XL.columns, np.expm1(sim.forward_mu(XL.columns, sim.betas(XL), sim.SCENARIOS[s], sl) * 12))), 3)
+        "expected_returns": {f"{s}/{sl}": r(dict(zip(XL.columns, np.expm1(sim.forward_mu(XL.columns, sim.betas(XL), sim.SCENARIOS[s], sl, mode=P1) * 12))), 3)
                              for s in sim.SCENARIOS for sl in sim.SLOPES},
         "corr_long": r(XL[["WORLD", "SPX", "NDX", "SEMI", "NVDA", "SPEC", "SCV", "EM", "GOLD"]].corr().to_dict(), 2),
     }
     paths = {}
     for u, X in (("long", XL), ("short", XS)):
-        Rf, lab = sim.bootstrap_forward(X)
+        Rf, lab = sim.bootstrap_forward(X, mode=P1)
         paths[u] = {"cols": list(X.columns), "forward": Rf, "labels": lab, "bootstrap": sim.bootstrap_raw(X),
-                    "t_mc": sim.t_mc(X), "hist": windows(X)}
+                    "t_mc": sim.t_mc(X, mode=P1), "hist": windows(X)}
 
     # ---------------------------------------------------------------- 24-month lump-sum outcomes, all portfolios
     res = {}
@@ -244,7 +249,7 @@ def main():
     # ---------------------------------------------------------------- exit rules (34-month paths, 10-month warm-up)
     X = XL
     exits = {}
-    Rf34, _ = sim.bootstrap_forward(X, horizon=34, seed=7)
+    Rf34, _ = sim.bootstrap_forward(X, horizon=34, seed=7, mode=P1)
     hist34 = windows(X, 34)
     for name in ("FINAL", "ORIGINAL"):
         port = P[name]
@@ -267,7 +272,7 @@ def main():
     out["exit_rules"] = r(exits)
 
     # ---------------------------------------------------------------- holding longer
-    Rf60, _ = sim.bootstrap_forward(X, horizon=60, seed=11)
+    Rf60, _ = sim.bootstrap_forward(X, horizon=60, seed=11, mode=P1)
     longer = {}
     for name in ("FINAL", "ORIGINAL", "SP500", "NASDAQ", "WORLD"):
         s = sim.simulate(Rf60, list(X.columns), P[name], rebalance_month=12, method="target")
@@ -293,7 +298,7 @@ def main():
         Xs = sim.log_returns(mm, ["CASH", "WORLD", col], "2000-09-30", LONG_SPAN[1])
         if len(Xs) < 60:
             continue
-        Rs, _ = sim.bootstrap_forward(Xs, seed=21)
+        Rs, _ = sim.bootstrap_forward(Xs, seed=21, mode=P1)
         g = np.exp(Rs[:, :, 2].sum(1))
         stocks[t] = {"from": str(Xs.index[0].date()), "beta": float(sim.betas(Xs)[col]),
                      "vol": float(Xs[col].std() * np.sqrt(12)),

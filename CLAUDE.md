@@ -53,7 +53,8 @@ GitHub/
 ├── tests/            # Research unit tests (Pine mirror engines)
 ├── nb3bot/           # Automated NB3 V2 futures bot (see nb3bot/README.md); tests in nb3bot/tests
 ├── investing/        # Long-term ETF pie research; research2026/ = Nov 2026 EUR portfolio study
-│                     #   (run_research.py -> results/research.json; tests in tests/test_research2026.py)
+│                     #   (Phase 1: run_research.py; Phase 2 audit/re-optimisation: audit.py, run_phase2.py;
+│                     #    results/*.json; tests in tests/test_research2026.py)
 ├── docs/             # Research write-up; docs/bot/ = install guide, operating manual, validation
 └── CLAUDE.md         # This file
 ```

@@ -1,0 +1,49 @@
+{
+ "orsd_reject": {
+  "cfg": {
+   "family": "orsd_reject",
+   "k": 4.0,
+   "stop": "bar",
+   "target": "ormid"
+  },
+  "design_sharpe": -0.0625199098170879,
+  "check_sharpe_HINDSIGHT": -0.7216113433594981,
+  "check_mean_r": -0.3556989338615298,
+  "check_trades": 32
+ },
+ "vwap_close": {
+  "cfg": {
+   "family": "vwap_close",
+   "k": 3.0,
+   "stop": 0.2,
+   "target": 2.0
+  },
+  "design_sharpe": -0.5374891031854351,
+  "check_sharpe_HINDSIGHT": -0.5078531124737722,
+  "check_mean_r": -0.10603812243243631,
+  "check_trades": 101
+ },
+ "vwap_reject": {
+  "cfg": {
+   "family": "vwap_reject",
+   "k": 3.0,
+   "stop": 0.2,
+   "target": "vwap"
+  },
+  "design_sharpe": -1.06231515873211,
+  "check_sharpe_HINDSIGHT": -0.1649745223752691,
+  "check_mean_r": -0.018249012166992488,
+  "check_trades": 244
+ },
+ "ote": {
+  "cfg": {
+   "family": "ote",
+   "e": 0.618,
+   "x": 0.27
+  },
+  "design_sharpe": -1.617529587702903,
+  "check_sharpe_HINDSIGHT": -0.1130695425104075,
+  "check_mean_r": -0.012001657225875673,
+  "check_trades": 476
+ }
+}

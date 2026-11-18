@@ -39,3 +39,10 @@ Committed BEFORE the round-9 grid is run (`backtest/run_round9.py`, `backtest/la
   * "beats NB3 steady": Sharpe > 1.57.
 * **Diversification:** for every pick, the correlation of its daily R with NB3 steady's, and the Sharpe of
   the two added together (equal risk) vs NB3 steady alone (1.57).
+
+## Outcome (added after the design run; details in RESULTS_9.md)
+
+* **Gold:** none of the 58 settings had a positive design Sharpe (best -0.06).
+* **Nasdaq:** best +0.20, on 32 trades.
+* **Picks:** no eligible setting, so no pick and no check run.
+* **Information only:** the best gold settings were negative in 2023-26 as well.

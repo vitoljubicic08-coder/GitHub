@@ -55,6 +55,8 @@ GitHub/
 ├── investing/        # Long-term ETF pie research; research2026/ = Nov 2026 EUR portfolio study
 │                     #   (Phase 1: run_research.py; Phase 2 audit/re-optimisation: audit.py, run_phase2.py;
 │                     #    results/*.json; tests in tests/test_research2026.py)
+├── roobet/           # Casino maths study ($10 -> $100 on Roobet): game models from verifier code,
+│                     #   exact Markov/DP solvers, Monte Carlo (run_roobet.py; tests/test_roobet.py)
 ├── docs/             # Research write-up; docs/bot/ = install guide, operating manual, validation
 └── CLAUDE.md         # This file
 ```

@@ -56,7 +56,8 @@ GitHub/
 │                     #   (Phase 1: run_research.py; Phase 2 audit/re-optimisation: audit.py, run_phase2.py;
 │                     #    results/*.json; tests in tests/test_research2026.py)
 ├── roobet/           # Casino maths study ($10 -> $100 on Roobet): game models from verifier code,
-│                     #   exact Markov/DP solvers, Monte Carlo (run_roobet.py; tests/test_roobet.py)
+│                     #   exact Markov/DP solvers, Monte Carlo (run_roobet.py; tests/test_roobet.py);
+│                     #   Phase 3 $20 -> $100 incl. Auto Bet (run_phase3.py; tests/test_roobet_phase3.py)
 ├── docs/             # Research write-up; docs/bot/ = install guide, operating manual, validation
 └── CLAUDE.md         # This file
 ```

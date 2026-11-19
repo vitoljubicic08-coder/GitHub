@@ -13,10 +13,16 @@ https://roobet.com/fair (fetched 2026-11-19); see `games.SOURCES`.
 | `blackjack.py` | Infinite-deck basic strategy with full outcome distributions (S17, 3:2, peek / no-peek) |
 | `hilo.py` | HiLo: best plan with unlimited skips and a finite-skip DP on a log-multiplier grid |
 | `run_roobet.py` | Runs everything (147 jobs, 100,000 challenges each) → `results/roobet_results.json` |
+| `autobet.py` | Phase 3: Roobet Auto Bet (on win/on loss reset or % increase, stop on profit/loss, halting when the next bet does not fit; optional manual finish) and the "every win lands on $100" geometric family |
+| `tabular.py` | Phase 3: any bankroll-only policy as a transition table (multi-game, multi-outcome, mixtures): exact solve and 1M-challenge simulation |
+| `baccarat.py` | Phase 3: exact 8-deck Punto Banco probabilities (third-party live tables; payouts assumed standard) |
+| `fairsim.py` | Phase 3 validation: challenges played with dice rolls derived exactly as Roobet's Dice verifier does (HMAC-SHA512), independent of the engine |
+| `run_phase3.py` | Phase 3 ($20 → $100): DP optima, game-switching union DP and optimality checks, Auto Bet search, 46 strategies × 1,000,000 challenges, provably-fair validation → `results/phase3_results.json` |
 
 ```bash
-cd roobet && python3 run_roobet.py            # ~2.5 min on 4 cores
-python3 -m unittest tests.test_roobet -v      # from the repo root: 16 tests
+cd roobet && python3 run_roobet.py            # $10 study, ~2.5 min on 4 cores
+cd roobet && python3 run_phase3.py            # $20 study, 1M challenges per strategy, ~15 min on 4 cores
+python3 -m unittest tests.test_roobet tests.test_roobet_phase3 -v      # from the repo root
 ```
 
 Seeds: strategy job *i* uses seed 1000+*i* (sample A); optimisation candidates use 1777+*i*

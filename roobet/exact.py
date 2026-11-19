@@ -140,3 +140,83 @@ def dp_multi(bets, unit=10, stake_fracs=None, iters=3000, tol=1e-12, cap_needed=
             break
         V = Vn
     return V, best_bet, best_stake
+
+
+# --------------------------------------------------------------------------- Phase 3: optimality checks
+def value_array(V):
+    """Append V(>= $100) = 1 so that next-bankroll indices up to TARGET can be looked up."""
+    out = np.ones(TARGET + 1)
+    out[: len(V)] = V
+    out[0] = 0.0
+    return out
+
+
+def max_improvement(V, nets, probs, maxloss=1.0, b_lo=1, b_hi=TARGET - 1, chunk=64):
+    """Largest one-step gain of a multi-outcome bet over V, across all bankrolls and stakes.
+
+    For every bankroll b and stake s (s * maxloss <= b), Q = sum_k p_k V(b + floor(s*net_k)).
+    If Q <= V(b) everywhere (gain <= 0), adding this bet cannot raise the optimum: V is then
+    an excessive function for the enlarged game, which bounds every strategy's success
+    probability (supermartingale argument). Returns (max gain, b, s) of the best violation.
+    """
+    Vx = value_array(V)
+    nets = np.asarray(nets, float)
+    probs = np.asarray(probs, float)
+    best = (-np.inf, 0, 0)
+    for lo in range(b_lo, b_hi + 1, chunk):
+        b = np.arange(lo, min(lo + chunk, b_hi + 1))
+        smax = int(b[-1] // maxloss)
+        if smax < 1:
+            continue
+        s = np.arange(1, smax + 1)
+        nx = b[:, None, None] + np.floor(s[None, :, None] * nets[None, None, :] + EPS).astype(np.int64)
+        nx = np.clip(nx, 0, TARGET)
+        q = (Vx[nx] * probs).sum(axis=2)
+        q = np.where(s[None, :] * maxloss <= b[:, None], q, -1.0)
+        gain = q - Vx[b][:, None]
+        i, j = np.unravel_index(np.argmax(gain), gain.shape)
+        if gain[i, j] > best[0]:
+            best = (float(gain[i, j]), int(b[i]), int(s[j]))
+    return best
+
+
+def sampled_two_outcome_check(V, game, n=20_000_000, seed=0, chunk=2_000_000, b_lo=1):
+    """Random (bankroll, stake, multiplier) triples, including bets that land BELOW $100:
+    the largest gain of p V(win) + (1-p) V(loss) over V(b). Evidence (not proof) that
+    aiming every bet at $100 cannot be beaten by intermediate landing points."""
+    Vx = value_array(V)
+    rng = np.random.default_rng(seed)
+    best = (-np.inf, 0, 0, 0.0)
+    for _ in range(n // chunk):
+        b = rng.integers(b_lo, TARGET, chunk)
+        s = np.maximum((rng.random(chunk) ** 2 * b).astype(np.int64), 1)
+        m_req = np.exp(rng.uniform(np.log(1.0103), np.log(TARGET / 1.0), chunk))
+        m, p = game.quote(m_req)
+        win = np.minimum(b - s + np.floor(s * m + EPS).astype(np.int64), TARGET)
+        q = p * Vx[win] + (1 - p) * Vx[b - s]
+        gain = q - Vx[b]
+        k = int(np.argmax(gain))
+        if gain[k] > best[0]:
+            best = (float(gain[k]), int(b[k]), int(s[k]), float(m[k]))
+    return best
+
+
+def target_hit_stats(game, pol):
+    """For the target-hitting policy `pol` (stake per bankroll): exact P, E[final], E[wagered],
+    E[bets] from every bankroll, by forward recursion (a loss always moves down)."""
+    N = len(pol)
+    P = np.zeros(N)
+    F = np.zeros(N)
+    W = np.zeros(N)
+    K = np.zeros(N)
+    for b in range(1, N):
+        s = int(pol[b])
+        m_req = (TARGET - b + s) / s
+        m, p = game.quote(np.array([m_req]))
+        m, p = float(m[0]), float(p[0])
+        win = b - s + np.floor(s * m + EPS)
+        P[b] = p + (1 - p) * P[b - s]
+        F[b] = p * win / 100 + (1 - p) * F[b - s]
+        W[b] = s / 100 + (1 - p) * W[b - s]
+        K[b] = 1 + (1 - p) * K[b - s]
+    return P, F, W, K

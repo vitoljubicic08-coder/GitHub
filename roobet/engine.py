@@ -1,8 +1,9 @@
 """Challenge engine: two-outcome game quotes, betting strategies, Monte Carlo and exact Markov chains.
 
-A challenge starts at $10.00 (1,000 cents) and ends when the bankroll reaches $100.00
-(10,000 cents), when it falls below the $0.01 minimum stake (i.e. reaches 0 cents), when a
-strategy's own stop rule fires (stop-loss / take-profit), or at the bet cap.
+A challenge starts at $10.00 (1,000 cents; Phase 3: `start=2000`, $20) and ends when the
+bankroll reaches $100.00 (10,000 cents), when it falls below the $0.01 minimum stake (i.e.
+reaches 0 cents), when a strategy's own stop rule fires (stop-loss / take-profit / Auto Bet
+halting), or at the bet cap.
 
 Identical rules for every strategy (so results are comparable):
   * stakes are whole cents, at least 1 cent and at most the bankroll;
@@ -74,20 +75,65 @@ class Crash(Game):
 
 
 class Menu(Game):
-    """A finite menu of (multiplier, probability) bets; quote picks the smallest m >= m_req."""
+    """A finite menu of (multiplier, probability) bets.
+
+    quote(m_req) returns the option with the highest win probability among all multipliers
+    >= m_req (ties go to the larger multiplier); above the largest multiplier it returns the
+    largest one. (Phase 1 took the smallest multiplier >= m_req, which is not always the
+    likeliest when a menu mixes difficulty levels, e.g. Towers.)
+    """
 
     def __init__(self, name, mults, probs):
-        order = np.argsort(mults)
+        order = np.argsort(mults, kind="stable")
         self.name = name
         self.m = np.asarray(mults, float)[order]
         self.p = np.asarray(probs, float)[order]
         self.rtp = float(np.max(self.m * self.p))
         self.max_mult = float(self.m[-1])
+        best = np.empty(len(self.m), np.int64)
+        bi = len(self.m) - 1
+        for k in range(len(self.m) - 1, -1, -1):
+            if self.p[k] > self.p[bi] + 1e-15:
+                bi = k
+            best[k] = bi
+        self.best = best
 
     def quote(self, m_req):
         i = np.searchsorted(self.m, np.asarray(m_req, float) - EPS)
         i = np.minimum(i, len(self.m) - 1)
-        return self.m[i], self.p[i]
+        j = self.best[i]
+        return self.m[j], self.p[j]
+
+
+class BestOf(Game):
+    """Several games at once: for each required multiplier, the game offering the highest
+    win probability at a multiplier >= m_req (a policy that may switch game every bet)."""
+
+    def __init__(self, games, name=None):
+        self.games = list(games)
+        self.name = name or " + ".join(g.name for g in self.games)
+        self.rtp = max(g.rtp for g in self.games)
+        self.max_mult = max(g.max_mult for g in self.games)
+
+    def choose(self, m_req):
+        m_req = np.asarray(m_req, float)
+        bm = np.zeros(m_req.shape)
+        bp = np.full(m_req.shape, -1.0)
+        bg = np.zeros(m_req.shape, np.int64)
+        for k, g in enumerate(self.games):
+            m, p = g.quote(m_req)
+            pp = np.where(m >= m_req - EPS, p, -1.0)
+            better = pp > bp + 1e-15
+            bm, bp, bg = np.where(better, m, bm), np.where(better, pp, bp), np.where(better, k, bg)
+        none = bp < 0                      # nobody reaches m_req: fall back to the first game's quote
+        if none.any():
+            m0, p0 = self.games[0].quote(m_req)
+            bm, bp = np.where(none, m0, bm), np.where(none, p0, bp)
+        return bm, bp, bg
+
+    def quote(self, m_req):
+        m, p, _ = self.choose(m_req)
+        return m, p
 
 
 def roulette_menu(bait_counts_as_colour=True):
@@ -149,6 +195,8 @@ class Strategy:
     name: str = ""
     family: str = ""
     extras: tuple = ()
+    exact_stakes = False      # True: no cap at the stake needed for $100 (Auto Bet places what it is told)
+    needs_B = False           # True: update_b(st, win, B) is called instead of update(st, win)
 
     def init(self, n):
         return {k: np.zeros(n, np.int64) for k in self.extras}
@@ -169,7 +217,8 @@ def place(strategy, game, B, st, rng=None):
     s, m_req = strategy.act(B, st, rng)
     m, p = game.quote(m_req)
     s = np.minimum(np.asarray(s, np.int64), B)
-    s = np.minimum(s, stake_needed(B, m))
+    if not strategy.exact_stakes:
+        s = np.minimum(s, stake_needed(B, m))
     s = np.maximum(s, 1)
     return s, m, p
 
@@ -357,6 +406,32 @@ class StopRule(Strategy):
         return out
 
 
+class TargetFraction(Strategy):
+    """Stake a fixed share of the bankroll, each bet at the multiplier that lands on $100."""
+
+    def __init__(self, f, name=None):
+        super().__init__(name or f"{f*100:g}% of bankroll aimed at $100", "target")
+        self.f = f
+
+    def act(self, B, st, rng=None):
+        s = np.maximum((self.f * B).astype(np.int64), 1)
+        return s, (TARGET - B + s) / s
+
+
+class Alternate(Strategy):
+    """Alternate between two multipliers, staking a fixed share of the bankroll."""
+
+    def __init__(self, f, m1, m2, name=None):
+        super().__init__(name or f"Alternate {m1:g}x / {m2:g}x, {f*100:g}% of bankroll", "alternate", ("k",))
+        self.f, self.m1, self.m2 = f, m1, m2
+
+    def act(self, B, st, rng=None):
+        return np.maximum((self.f * B).astype(np.int64), 1), np.where(st["k"] == 0, self.m1, self.m2)
+
+    def update(self, st, win):
+        return {"k": 1 - st["k"]}
+
+
 class RandomVariable(Strategy):
     """Variable sizing: a random 2-25% of the bankroll at a random multiplier each bet."""
     MULTS = np.array([1.5, 2.0, 3.0, 5.0, 10.0])
@@ -371,36 +446,42 @@ class RandomVariable(Strategy):
 
 
 # =========================================================================== Monte Carlo
-LEVELS = (2000, 3000, 5000, 7500, 10000)
+LEVELS = (2000, 3000, 5000, 7500, 10000)        # $10 study: touch $20/$30/$50/$75/$100
+LEVELS20 = (4000, 6000, 8000, 10000)            # $20 study: touch $40/$60/$80/$100
 
 
-def simulate(strategy, game, n=100_000, seed=0, cap=100_000, chunk=None):
-    """Run n independent challenges. Returns per-path arrays and a summary dict."""
-    rng = np.random.default_rng(seed)
+def _update(strategy, st, win, B):
+    """Strategies whose next state depends on the bankroll (Auto Bet) get it passed in."""
+    if getattr(strategy, "needs_B", False):
+        return strategy.update_b(st, win, B)
+    return strategy.update(st, win)
+
+
+def _sim_chunk(strategy, game, n, rng, cap, start):
     ids = np.arange(n)
-    B = np.full(n, START, np.int64)
+    B = np.full(n, start, np.int64)
     st = strategy.init(n)
     bets = np.zeros(n, np.int64)
+    wins = np.zeros(n, np.int64)
     wagered = np.zeros(n, np.int64)
     peak = B.copy()
     maxdd = np.zeros(n, np.int64)
-    out_B = np.zeros(n, np.int64)
-    out_bets = np.zeros(n, np.int64)
-    out_wag = np.zeros(n, np.int64)
-    out_peak = np.zeros(n, np.int64)
-    out_dd = np.zeros(n, np.int64)
-    out_end = np.zeros(n, np.int8)        # 1 target, 2 ruin, 3 stopped, 4 cap
-    step = 0
+    maxddp = np.zeros(n, np.float64)
+    out = {k: np.zeros(n, np.int64) for k in ("B", "bets", "wins", "wagered", "peak", "maxdd")}
+    out["maxdd_pct"] = np.zeros(n, np.float64)
+    out["end"] = np.zeros(n, np.int8)        # 1 target, 2 ruin, 3 stopped, 4 cap
     while len(ids):
         s, m, p = place(strategy, game, B, st, rng)
         win = rng.random(len(ids)) < p
+        Bprev = B
         B = np.where(win, B - s + np.floor(s * m + EPS).astype(np.int64), B - s)
-        st = strategy.update(st, win)
+        st = _update(strategy, st, win, Bprev)
         bets += 1
+        wins += win
         wagered += s
         peak = np.maximum(peak, B)
         maxdd = np.maximum(maxdd, peak - B)
-        step += 1
+        maxddp = np.maximum(maxddp, (peak - B) / peak)
         end = np.zeros(len(ids), np.int8)
         end[B >= TARGET] = 1
         end[(end == 0) & (B < 1)] = 2
@@ -409,13 +490,31 @@ def simulate(strategy, game, n=100_000, seed=0, cap=100_000, chunk=None):
         done = end > 0
         if done.any():
             d = ids[done]
-            out_B[d], out_bets[d], out_wag[d] = B[done], bets[done], wagered[done]
-            out_peak[d], out_dd[d], out_end[d] = peak[done], maxdd[done], end[done]
+            for key, arr in (("B", B), ("bets", bets), ("wins", wins), ("wagered", wagered), ("peak", peak),
+                             ("maxdd", maxdd), ("maxdd_pct", maxddp)):
+                out[key][d] = arr[done]
+            out["end"][d] = end[done]
             keep = ~done
-            ids, B, bets, wagered, peak, maxdd = ids[keep], B[keep], bets[keep], wagered[keep], peak[keep], maxdd[keep]
+            ids, B, bets, wins, wagered = ids[keep], B[keep], bets[keep], wins[keep], wagered[keep]
+            peak, maxdd, maxddp = peak[keep], maxdd[keep], maxddp[keep]
             st = {k: v[keep] for k, v in st.items()}
-    paths = dict(B=out_B, bets=out_bets, wagered=out_wag, peak=out_peak, maxdd=out_dd, end=out_end)
-    return paths, summarize(paths)
+    return out
+
+
+def simulate(strategy, game, n=100_000, seed=0, cap=100_000, start=START, levels=LEVELS, chunk=250_000):
+    """Run n independent challenges from `start` cents. Returns per-path arrays and a summary.
+
+    n <= chunk uses default_rng(seed) (the Phase 1 seeding); larger runs are split into
+    chunks with independent child streams of SeedSequence(seed), so memory stays bounded.
+    """
+    if n <= chunk:
+        paths = _sim_chunk(strategy, game, n, np.random.default_rng(seed), cap, start)
+    else:
+        sizes = [chunk] * (n // chunk) + ([n % chunk] if n % chunk else [])
+        kids = np.random.SeedSequence(seed).spawn(len(sizes))
+        parts = [_sim_chunk(strategy, game, k, np.random.default_rng(c), cap, start) for k, c in zip(sizes, kids)]
+        paths = {key: np.concatenate([q[key] for q in parts]) for key in parts[0]}
+    return paths, summarize(paths, start, levels)
 
 
 def wilson(k, n, z=1.959964):
@@ -428,123 +527,153 @@ def wilson(k, n, z=1.959964):
     return (c - h, c + h)
 
 
-def summarize(paths) -> dict:
+def summarize(paths, start=START, levels=LEVELS) -> dict:
     n = len(paths["B"])
     B, end = paths["B"], paths["end"]
     k = int((end == 1).sum())
     fin = B / 100
-    se_mean = fin.std(ddof=1) / np.sqrt(n)
+    sd = float(fin.std(ddof=1))
+    se_mean = sd / np.sqrt(n)
     out = dict(
         n=n,
         p_target=k / n, p_target_ci=wilson(k, n),
         p_ruin=float((end == 2).mean()), p_stopped=float((end == 3).mean()), p_cap=float((end == 4).mean()),
         mean_final=float(fin.mean()), mean_final_ci=(float(fin.mean() - 1.96 * se_mean), float(fin.mean() + 1.96 * se_mean)),
-        median_final=float(np.median(fin)),
-        exp_profit=float(fin.mean() - START / 100),
+        median_final=float(np.median(fin)), sd_final=sd,
+        exp_profit=float(fin.mean() - start / 100),
         mean_bets=float(paths["bets"].mean()), median_bets=float(np.median(paths["bets"])),
         p90_bets=float(np.percentile(paths["bets"], 90)),
         mean_wagered=float(paths["wagered"].mean() / 100),
         median_maxdd=float(np.median(paths["maxdd"]) / 100), p90_maxdd=float(np.percentile(paths["maxdd"], 90) / 100),
-        reach={str(L // 100): float((paths["peak"] >= L).mean()) for L in LEVELS},
+        reach={str(L // 100): float((paths["peak"] >= L).mean()) for L in levels},
     )
-    out["reach_ci"] = {str(L // 100): wilson(int((paths["peak"] >= L).sum()), n) for L in LEVELS}
+    if "wins" in paths:
+        out["mean_wins"] = float(paths["wins"].mean())
+        out["mean_losses"] = float((paths["bets"] - paths["wins"]).mean())
+    if "maxdd_pct" in paths:
+        out["mean_maxdd_pct"] = float(paths["maxdd_pct"].mean() * 100)
+        out["median_maxdd_pct"] = float(np.median(paths["maxdd_pct"]) * 100)
+    out["reach_ci"] = {str(L // 100): wilson(int((paths["peak"] >= L).sum()), n) for L in levels}
     return out
 
 
 # =========================================================================== exact Markov chain
-def _key(B, st):
-    cols = [B] + [st[k] for k in sorted(st)]
-    return np.stack(cols, axis=1)
+RADIX = 16384          # each strategy counter must stay below this (states are packed into one int64)
 
 
-def markov_exact(strategy, game, levels=LEVELS, max_states=3_000_000):
+def _encode(B, st, names):
+    code = np.asarray(B, np.int64).copy()
+    for k in names:
+        v = np.asarray(st[k], np.int64)
+        if v.size and (v.min() < 0 or v.max() >= RADIX):
+            raise ValueError(f"state counter {k} out of range for exact solver")
+        code = code * RADIX + v
+    return code
+
+
+def markov_exact(strategy, game, levels=LEVELS, start=START, max_states=3_000_000):
     """Exact absorption probabilities by enumerating every reachable state.
 
     Only for deterministic strategies with finite integer state (not Labouchere/random).
-    Returns P(target), P(ruin), P(stopped), E[final $], E[bets], E[wagered $] and P(reach L).
+    A state is (bankroll in cents, the strategy's counters). Returns P(target), P(ruin),
+    P(stopped), E[final $], SD[final $], E[bets], E[wagered $] and P(touch L) for each level L.
     """
     names = sorted(strategy.init(1).keys())
-    start = np.array([[START] + [int(strategy.init(1)[k][0]) for k in names]], np.int64)
-    index = {tuple(start[0]): 0}
-    states = [start[0]]
-    frontier = start
+    st0 = strategy.init(1)
+    index = {int(_encode(np.array([start]), st0, names)[0]): 0}
+    Bcol = [start]
+    fB = np.array([start], np.int64)
+    fst = {k: st0[k].copy() for k in names}
+    fidx = np.array([0], np.int64)
     rows, cols, vals = [], [], []
-    stake_of, absorbed = {}, {}
-    while len(frontier):
-        B = frontier[:, 0]
-        st = {k: frontier[:, j + 1] for j, k in enumerate(names)}
-        s, m, p = place(strategy, game, B, st)
-        Bw = B - s + np.floor(s * m + EPS).astype(np.int64)
-        Bl = B - s
-        stw = strategy.update(st, np.ones(len(B), bool))
-        stl = strategy.update(st, np.zeros(len(B), bool))
-        new = []
+    ab_src, ab_kind, ab_pr, ab_nb = [], [], [], []        # absorbing transitions: kind 0 T, 1 R, 2 S
+    stake_idx, stake_val = [], []
+    while len(fB):
+        s, m, p = place(strategy, game, fB, fst)
+        stake_idx.append(fidx)
+        stake_val.append(s)
+        Bw = fB - s + np.floor(s * m + EPS).astype(np.int64)
+        Bl = fB - s
+        stw = _update(strategy, fst, np.ones(len(fB), bool), fB)
+        stl = _update(strategy, fst, np.zeros(len(fB), bool), fB)
+        nB, nst, nidx = [], {k: [] for k in names}, []
         for nxt, pr, sto in ((Bw, p, stw), (Bl, 1 - p, stl)):
-            keys = np.stack([nxt] + [sto[k] for k in names], axis=1)
-            stop = strategy.stop(nxt, sto)
-            for i in range(len(B)):
-                src = index[tuple(frontier[i])]
-                kk = tuple(keys[i])
-                if nxt[i] >= TARGET:
-                    kind = "T"
-                elif nxt[i] < 1:
-                    kind = "R"
-                elif stop[i]:
-                    kind = ("S", int(nxt[i]))
-                else:
-                    kind = None
-                if kind is not None:
-                    absorbed.setdefault(src, []).append((kind, float(pr[i]), int(nxt[i])))
-                    continue
-                j = index.get(kk)
+            pr = np.broadcast_to(np.asarray(pr, float), nxt.shape)
+            T = nxt >= TARGET
+            R = (nxt < 1) & ~T
+            S = strategy.stop(nxt, sto) & ~T & ~R
+            for kind, mask in ((0, T), (1, R), (2, S)):
+                if mask.any():
+                    ab_src.append(fidx[mask])
+                    ab_kind.append(np.full(int(mask.sum()), kind))
+                    ab_pr.append(pr[mask])
+                    ab_nb.append(nxt[mask])
+            C = ~(T | R | S)
+            if not C.any():
+                continue
+            codes = _encode(nxt[C], {k: sto[k][C] for k in names}, names).tolist()
+            js = np.empty(len(codes), np.int64)
+            fresh = []
+            for q, c in enumerate(codes):
+                j = index.get(c)
                 if j is None:
-                    j = len(states)
-                    index[kk] = j
-                    states.append(np.array(kk))
-                    new.append(kk)
-                rows.append(src)
-                cols.append(j)
-                vals.append(float(pr[i]))
-        for i in range(len(B)):
-            stake_of[index[tuple(frontier[i])]] = int(s[i])
-        frontier = np.array(new, np.int64) if new else np.zeros((0, 1 + len(names)), np.int64)
-        if len(states) > max_states:
+                    j = len(index)
+                    index[c] = j
+                    fresh.append(q)
+                js[q] = j
+            rows.append(fidx[C])
+            cols.append(js)
+            vals.append(pr[C])
+            if fresh:
+                fresh = np.array(fresh)
+                cnB = nxt[C][fresh]
+                nB.append(cnB)
+                Bcol.extend(cnB.tolist())
+                for k in names:
+                    nst[k].append(sto[k][C][fresh])
+                nidx.append(js[fresh])
+        if nB:
+            fB = np.concatenate(nB)
+            fst = {k: np.concatenate(nst[k]) for k in names}
+            fidx = np.concatenate(nidx)
+        else:
+            fB = np.zeros(0, np.int64)
+        if len(index) > max_states:
             raise MemoryError("state space too large")
-    N = len(states)
-    Q = sparse.csr_matrix((vals, (rows, cols)), shape=(N, N))
+    N = len(index)
+    cat = lambda xs, dt=float: np.concatenate(xs) if xs else np.zeros(0, dt)
+    Q = sparse.csr_matrix((cat(vals), (cat(rows, np.int64), cat(cols, np.int64))), shape=(N, N))
     A = (sparse.identity(N, format="csr") - Q).tocsc()
-    rT = np.zeros(N)
-    rR = np.zeros(N)
-    rS = np.zeros(N)
-    rF = np.zeros(N)
-    for src, lst in absorbed.items():
-        for kind, pr, nb in lst:
-            if kind == "T":
-                rT[src] += pr
-            elif kind == "R":
-                rR[src] += pr
-            else:
-                rS[src] += pr
-            rF[src] += pr * nb / 100
-    stake = np.array([stake_of[i] for i in range(N)]) / 100
-    sol = spsolve(A, np.column_stack([rT, rR, rS, rF, np.ones(N), stake]))
-    sol = np.atleast_2d(sol)
+    src, kind, pr, nb = cat(ab_src, np.int64), cat(ab_kind, np.int64), cat(ab_pr), cat(ab_nb, np.int64)
+    rhs = np.zeros((N, 7))
+    np.add.at(rhs[:, 0], src[kind == 0], pr[kind == 0])
+    np.add.at(rhs[:, 1], src[kind == 1], pr[kind == 1])
+    np.add.at(rhs[:, 2], src[kind == 2], pr[kind == 2])
+    np.add.at(rhs[:, 3], src, pr * nb / 100)
+    np.add.at(rhs[:, 4], src, pr * (nb / 100) ** 2)
+    rhs[:, 5] = 1.0
+    stake = np.zeros(N)
+    stake[cat(stake_idx, np.int64)] = cat(stake_val, np.int64) / 100
+    rhs[:, 6] = stake
+    sol = np.atleast_2d(spsolve(A, rhs))
     res = dict(states=N, p_target=sol[0, 0], p_ruin=sol[0, 1], p_stopped=sol[0, 2],
-               mean_final=sol[0, 3], mean_bets=sol[0, 4], mean_wagered=sol[0, 5])
-    # P(reach level L): make B >= L absorbing
-    Bcol = np.array([s[0] for s in states])
+               mean_final=sol[0, 3], sd_final=float(np.sqrt(max(sol[0, 4] - sol[0, 3] ** 2, 0.0))),
+               mean_bets=sol[0, 5], mean_wagered=sol[0, 6])
+    # P(touch level L): bankroll >= L at some point, i.e. make every state with B >= L absorbing
+    Bcol = np.array(Bcol)
     reach = {}
     for L in levels:
-        if L >= TARGET:
-            reach[str(L // 100)] = res["p_target"]
-            continue
         hit = Bcol >= L
         if hit[0]:
             reach[str(L // 100)] = 1.0
             continue
         keep = ~hit
         Qk = Q[keep][:, keep]
-        r = np.asarray(Q[keep][:, hit].sum(axis=1)).ravel() + rT[keep]
+        r = np.asarray(Q[keep][:, hit].sum(axis=1)).ravel()
+        big = nb >= L
+        add = np.zeros(N)
+        np.add.at(add, src[big], pr[big])
+        r = r + add[keep]
         x = spsolve((sparse.identity(int(keep.sum()), format="csr") - Qk).tocsc(), r)
         reach[str(L // 100)] = float(np.atleast_1d(x)[0])
     res["reach"] = reach

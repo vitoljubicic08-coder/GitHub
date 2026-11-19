@@ -58,6 +58,9 @@ GitHub/
 ├── roobet/           # Casino maths study ($10 -> $100 on Roobet): game models from verifier code,
 │                     #   exact Markov/DP solvers, Monte Carlo (run_roobet.py; tests/test_roobet.py);
 │                     #   Phase 3 $20 -> $100 incl. Auto Bet (run_phase3.py; tests/test_roobet_phase3.py)
+├── aibiz/            # AI automation business: research/ (niche + service scoring), mvp/ (Quotebook booking
+│                     #   assistant, stdlib + SQLite, dry-run messaging only; tests: cd aibiz/mvp &&
+│                     #   python3 -m unittest discover -s tests -t .), finance/model.py, validation/, sales/, plan/
 ├── docs/             # Research write-up; docs/bot/ = install guide, operating manual, validation
 └── CLAUDE.md         # This file
 ```

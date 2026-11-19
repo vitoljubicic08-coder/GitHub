@@ -11,3 +11,7 @@ nb3bot_demo.toml
 state_lucid/
 logs_lucid/
 nb3bot_lucid.toml
+
+# Roobet scratch outputs (quick smoke runs and live run logs)
+roobet/results/*_quick.json
+roobet/results/*.log

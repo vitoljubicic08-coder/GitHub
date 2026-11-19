@@ -1,0 +1,76 @@
+{
+  "business": {
+    "id": "cisto-demo",
+    "name": "Čisto & Uredno (demo)",
+    "timezone": "Europe/Zagreb",
+    "default_language": "hr",
+    "address": "Izmišljena demo tvrtka, Zagreb",
+    "location": {
+      "hr": "Dolazimo na vašu adresu u Zagrebu i okolici (demo).",
+      "en": "We come to your address in Zagreb and the surrounding area (demo)."
+    },
+    "owner_contact": "owner@example.invalid"
+  },
+  "measure": "area_m2",
+  "resources": [
+    {"id": "team_a", "name": "Ekipa A"},
+    {"id": "team_b", "name": "Ekipa B"}
+  ],
+  "hours": {
+    "mon": [["08:00", "18:00"]], "tue": [["08:00", "18:00"]], "wed": [["08:00", "18:00"]],
+    "thu": [["08:00", "18:00"]], "fri": [["08:00", "18:00"]], "sat": [["08:00", "13:00"]], "sun": []
+  },
+  "closed_dates": [],
+  "booking": {
+    "slot_step_minutes": 60,
+    "min_notice_hours": 24,
+    "horizon_days": 21,
+    "hold_minutes": 20,
+    "buffer_minutes": 60,
+    "require_owner_confirmation": true,
+    "max_suggestions": 3
+  },
+  "services": [
+    {
+      "id": "regular",
+      "names": {"hr": "Redovno čišćenje stana", "en": "Regular home cleaning"},
+      "keywords": ["redovn", "tjedn", "svaki tjedan", "regular", "weekly", "standard"],
+      "price": {"per_m2": 1.2, "minimum": 50, "range_pct": 10},
+      "duration": {"base_minutes": 60, "minutes_per_m2": 2, "max_minutes": 360}
+    },
+    {
+      "id": "deep",
+      "names": {"hr": "Generalno (dubinsko) čišćenje", "en": "Deep cleaning"},
+      "keywords": ["generaln", "dubinsk", "temeljit", "deep", "spring clean", "thorough"],
+      "price": {"per_m2": 2.5, "minimum": 90, "range_pct": 15},
+      "duration": {"base_minutes": 60, "minutes_per_m2": 4, "max_minutes": 540}
+    },
+    {
+      "id": "renovation",
+      "names": {"hr": "Čišćenje nakon renovacije", "en": "After-renovation cleaning"},
+      "keywords": ["renovacij", "gradevinsk", "radova", "adaptacij", "renovation", "construction", "builders"],
+      "price": {"per_m2": 3.5, "minimum": 150, "range_pct": 20},
+      "duration": {"base_minutes": 120, "minutes_per_m2": 5, "max_minutes": 600}
+    },
+    {
+      "id": "windows",
+      "names": {"hr": "Pranje prozora", "en": "Window cleaning"},
+      "keywords": ["prozor", "staklo", "stakla", "window"],
+      "needs_measure": false,
+      "price": {"fixed": 60, "range_pct": 25},
+      "duration": {"minutes": 120}
+    }
+  ],
+  "messaging": {
+    "send_enabled": false,
+    "channel": "dryrun",
+    "reminder_hours_before": 24,
+    "quiet_start": "21:00",
+    "quiet_end": "08:00",
+    "followup_after_hours": 48,
+    "max_attempts": 6
+  },
+  "retention": {"conversation_days": 90, "customer_inactive_days": 730, "audit_days": 730},
+  "rate_limits": {"per_conversation_per_minute": 12, "per_ip_per_minute": 40, "login_per_ip_per_minute": 5},
+  "assistant": {"interpreter": "rules", "llm_model": "claude-opus-5-5", "llm_timeout_s": 10, "max_unclear": 2}
+}

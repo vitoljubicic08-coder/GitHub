@@ -1,0 +1,82 @@
+{
+  "business": {
+    "id": "sjaj-demo",
+    "name": "Sjaj Auto Detailing (demo)",
+    "timezone": "Europe/Zagreb",
+    "default_language": "hr",
+    "address": "Demo ulica 1, 10000 Zagreb (izmišljena adresa)",
+    "location": {
+      "hr": "Nalazimo se na adresi Demo ulica 1, Zagreb (izmišljena demo adresa). Parking je ispred studija.",
+      "en": "We're at Demo ulica 1, Zagreb (a fictional demo address). Parking is in front of the studio."
+    },
+    "owner_contact": "owner@example.invalid"
+  },
+  "measure": "vehicle_size",
+  "sizes": {
+    "small": {"hr": "malo vozilo", "en": "small car", "keywords": ["malo", "mali auto", "gradsk", "small", "hatchback", "polo", "clio", "corsa", "fiesta"]},
+    "medium": {"hr": "srednje vozilo", "en": "mid-size car", "keywords": ["srednj", "limuzin", "karavan", "sedan", "mid-size", "medium", "estate", "golf", "octavia", "astra"]},
+    "large": {"hr": "SUV / veliko vozilo", "en": "SUV / large car", "keywords": ["suv", "teren", "veliko", "veliki", "large", "x5", "tiguan", "kodiaq", "4x4"]},
+    "van": {"hr": "kombi", "en": "van", "keywords": ["kombi", "van", "minibus", "monovolumen", "transporter"]}
+  },
+  "resources": [
+    {"id": "box1", "name": "Box 1"},
+    {"id": "box2", "name": "Box 2"}
+  ],
+  "hours": {
+    "mon": [["08:00", "17:00"]], "tue": [["08:00", "17:00"]], "wed": [["08:00", "17:00"]],
+    "thu": [["08:00", "17:00"]], "fri": [["08:00", "17:00"]], "sat": [["09:00", "14:00"]], "sun": []
+  },
+  "closed_dates": ["2026-12-24", "2026-12-31"],
+  "booking": {
+    "slot_step_minutes": 30,
+    "min_notice_hours": 12,
+    "horizon_days": 30,
+    "hold_minutes": 20,
+    "buffer_minutes": 30,
+    "require_owner_confirmation": true,
+    "max_suggestions": 3
+  },
+  "services": [
+    {
+      "id": "wash",
+      "names": {"hr": "Pranje izvana i iznutra", "en": "Exterior and interior wash"},
+      "keywords": ["pranj", "oprat", "operi", "wash", "clean my car", "cist auto"],
+      "price": {"by_size": {"small": 35, "medium": 45, "large": 55, "van": 65}, "range_pct": 10},
+      "duration": {"by_size": {"small": 90, "medium": 120, "large": 120, "van": 150}}
+    },
+    {
+      "id": "interior",
+      "names": {"hr": "Dubinsko čišćenje interijera", "en": "Deep interior cleaning"},
+      "keywords": ["dubinsk", "interijer", "unutras", "sjedal", "tapacir", "interior", "seats", "upholstery"],
+      "price": {"by_size": {"small": 90, "medium": 110, "large": 130, "van": 160}, "range_pct": 15},
+      "duration": {"by_size": {"small": 180, "medium": 210, "large": 240, "van": 300}}
+    },
+    {
+      "id": "polish",
+      "names": {"hr": "Poliranje laka", "en": "Paint polishing"},
+      "keywords": ["polir", "ogrebotin", "lak", "sjaj", "polish", "scratch", "swirl", "paint correction"],
+      "price": {"by_size": {"small": 180, "medium": 220, "large": 260, "van": 300}, "range_pct": 20},
+      "duration": {"by_size": {"small": 300, "medium": 360, "large": 420, "van": 480}}
+    },
+    {
+      "id": "ceramic",
+      "names": {"hr": "Keramička zaštita", "en": "Ceramic coating"},
+      "keywords": ["keramik", "keramick", "ceramic", "coating", "zastit"],
+      "price": {"by_size": {"small": 400, "medium": 480, "large": 560, "van": 650}, "range_pct": 20},
+      "duration": {"by_size": {"small": 420, "medium": 480, "large": 480, "van": 480}},
+      "resources": ["box1"]
+    }
+  ],
+  "messaging": {
+    "send_enabled": false,
+    "channel": "dryrun",
+    "reminder_hours_before": 24,
+    "quiet_start": "21:00",
+    "quiet_end": "08:00",
+    "followup_after_hours": 48,
+    "max_attempts": 6
+  },
+  "retention": {"conversation_days": 90, "customer_inactive_days": 730, "audit_days": 730},
+  "rate_limits": {"per_conversation_per_minute": 12, "per_ip_per_minute": 40, "login_per_ip_per_minute": 5},
+  "assistant": {"interpreter": "rules", "llm_model": "claude-opus-5-5", "llm_timeout_s": 10, "max_unclear": 2}
+}

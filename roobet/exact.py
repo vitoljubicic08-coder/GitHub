@@ -64,7 +64,10 @@ def dp_target_hit(game, b_max=TARGET - 1):
         ok = (m >= m_req - EPS) & (b - s + np.floor(s * m + EPS) >= TARGET)
         val = np.where(ok, p + (1 - p) * V[b - s], -1.0)
         j = int(np.argmax(val))
-        V[b], pol[b] = val[j], s[j]
+        if val[j] < 0:                 # no bet from b can reach $100 (only b = 1 cent on Dice)
+            V[b], pol[b] = 0.0, b
+        else:
+            V[b], pol[b] = val[j], s[j]
     return V, pol
 
 
@@ -215,6 +218,8 @@ def target_hit_stats(game, pol):
         m, p = game.quote(np.array([m_req]))
         m, p = float(m[0]), float(p[0])
         win = b - s + np.floor(s * m + EPS)
+        if win < TARGET:               # this bet cannot reach $100 (1-cent bankroll on Dice)
+            p = 0.0
         P[b] = p + (1 - p) * P[b - s]
         F[b] = p * win / 100 + (1 - p) * F[b - s]
         W[b] = s / 100 + (1 - p) * W[b - s]

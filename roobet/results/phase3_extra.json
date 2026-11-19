@@ -1,0 +1,234 @@
+{
+ "compare_sim": [
+  {
+   "label": "One all-in bet aimed at $100",
+   "start": 1000,
+   "median_bets": 1.0,
+   "p90_bets": 1.0,
+   "mean_maxdd_pct": 90.1305,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 10.0,
+   "sd_final": 29.825281515638498,
+   "p_target": 0.098695
+  },
+  {
+   "label": "One all-in bet aimed at $100",
+   "start": 2000,
+   "median_bets": 1.0,
+   "p90_bets": 1.0,
+   "mean_maxdd_pct": 80.255,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 20.0,
+   "sd_final": 39.80757337761862,
+   "p_target": 0.19745
+  },
+  {
+   "label": "Optimal policy (DP), Dice",
+   "start": 1000,
+   "median_bets": 11.0,
+   "p90_bets": 11.0,
+   "mean_maxdd_pct": 94.3485645,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 10.0,
+   "sd_final": 29.83877375120674,
+   "p_target": 0.098795
+  },
+  {
+   "label": "Optimal policy (DP), Dice",
+   "start": 2000,
+   "median_bets": 23.0,
+   "p90_bets": 23.0,
+   "mean_maxdd_pct": 88.8646835,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 20.0,
+   "sd_final": 39.84403229527376,
+   "p_target": 0.19793
+  },
+  {
+   "label": "Two all-in stages",
+   "start": 1000,
+   "median_bets": 1.0,
+   "p90_bets": 2.0,
+   "mean_maxdd_pct": 90.2615,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 10.0,
+   "sd_final": 29.651169029614845,
+   "p_target": 0.097385
+  },
+  {
+   "label": "Two all-in stages",
+   "start": 2000,
+   "median_bets": 1.0,
+   "p90_bets": 2.0,
+   "mean_maxdd_pct": 80.508,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 20.0,
+   "sd_final": 39.61400992513775,
+   "p_target": 0.19492
+  },
+  {
+   "label": "Bold play at 2x",
+   "start": 1000,
+   "median_bets": 1.0,
+   "p90_bets": 4.0,
+   "mean_maxdd_pct": 91.641125,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 10.0,
+   "sd_final": 29.411826448346847,
+   "p_target": 0.095655
+  },
+  {
+   "label": "Bold play at 2x",
+   "start": 2000,
+   "median_bets": 1.0,
+   "p90_bets": 4.0,
+   "mean_maxdd_pct": 83.084875,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 20.0,
+   "sd_final": 39.517428043024196,
+   "p_target": 0.19367
+  },
+  {
+   "label": "Fixed 25% of bankroll at 2x",
+   "start": 1000,
+   "median_bets": 183.0,
+   "p90_bets": 351.0,
+   "mean_maxdd_pct": 97.26678020167367,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 16.41,
+   "sd_final": 27.543649413487586,
+   "p_target": 0.082705
+  },
+  {
+   "label": "Fixed 25% of bankroll at 2x",
+   "start": 2000,
+   "median_bets": 182.0,
+   "p90_bets": 353.0,
+   "mean_maxdd_pct": 92.91350746907278,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 29.28,
+   "sd_final": 37.98439816322642,
+   "p_target": 0.174855
+  },
+  {
+   "label": "Martingale $0.10",
+   "start": 1000,
+   "median_bets": 227.0,
+   "p90_bets": 1707.0,
+   "mean_maxdd_pct": 96.60580974394284,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 18.4,
+   "sd_final": 26.984865979192104,
+   "p_target": 0.07907
+  },
+  {
+   "label": "Martingale $0.10",
+   "start": 2000,
+   "median_bets": 449.0,
+   "p90_bets": 1688.0,
+   "mean_maxdd_pct": 91.87072645087578,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 30.7,
+   "sd_final": 37.58795392504627,
+   "p_target": 0.17028
+  },
+  {
+   "label": "Fibonacci $0.10",
+   "start": 1000,
+   "median_bets": 490.0,
+   "p90_bets": 3548.0,
+   "mean_maxdd_pct": 97.48879414268775,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 18.0,
+   "sd_final": 24.942418093903843,
+   "p_target": 0.066655
+  },
+  {
+   "label": "Fibonacci $0.10",
+   "start": 2000,
+   "median_bets": 939.0,
+   "p90_bets": 4274.0,
+   "mean_maxdd_pct": 93.71909460994179,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 32.3,
+   "sd_final": 35.37825182020035,
+   "p_target": 0.146675
+  },
+  {
+   "label": "D'Alembert $0.10",
+   "start": 1000,
+   "median_bets": 234.0,
+   "p90_bets": 1344.0,
+   "mean_maxdd_pct": 98.51229307541254,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 17.9,
+   "sd_final": 22.564294465746624,
+   "p_target": 0.05381
+  },
+  {
+   "label": "D'Alembert $0.10",
+   "start": 2000,
+   "median_bets": 443.0,
+   "p90_bets": 1617.0,
+   "mean_maxdd_pct": 96.10327194419058,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 32.5,
+   "sd_final": 32.5499490244748,
+   "p_target": 0.12046
+  },
+  {
+   "label": "Flat $1 at 2x",
+   "start": 1000,
+   "median_bets": 178.0,
+   "p90_bets": 1876.0,
+   "mean_maxdd_pct": 99.01666939789568,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 18.0,
+   "sd_final": 18.212699786472285,
+   "p_target": 0.03435
+  },
+  {
+   "label": "Flat $1 at 2x",
+   "start": 2000,
+   "median_bets": 602.0,
+   "p90_bets": 3200.0,
+   "mean_maxdd_pct": 97.31451433625814,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 32.0,
+   "sd_final": 26.84788676590988,
+   "p_target": 0.078195
+  },
+  {
+   "label": "Flat $1 at 1.1x",
+   "start": 1000,
+   "median_bets": 661.0,
+   "p90_bets": 2182.100000000006,
+   "mean_maxdd_pct": 100.0,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 13.1,
+   "sd_final": 0.0,
+   "p_target": 0.0
+  },
+  {
+   "label": "Flat $1 at 1.1x",
+   "start": 2000,
+   "median_bets": 1589.0,
+   "p90_bets": 3837.0,
+   "mean_maxdd_pct": 100.0,
+   "median_maxdd_pct": 100.0,
+   "median_maxdd": 23.5,
+   "sd_final": 0.0,
+   "p_target": 0.0
+  }
+ ],
+ "switching": {
+  "max_gain": 9.8e-05,
+  "at_bankroll": 0.01,
+  "n_better": 960,
+  "gain_at_20": 0.0,
+  "policy_game_counts": {
+   "Dice (RTP 99.0%)": 9291,
+   "Limbo": 708
+  }
+ }
+}
